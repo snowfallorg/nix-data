@@ -24,6 +24,7 @@ struct ProfilePkgOut {
     storepaths: Vec<String>,
 }
 
+/// Struct containing information about a package installed with `nix profile`.
 #[derive(Debug)]
 pub struct ProfilePkg {
     pub name: String,
@@ -73,7 +74,7 @@ struct NixPkgListOut {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NixPkg {
+struct NixPkg {
     name: IString,
     pname: IString,
     version: IString,

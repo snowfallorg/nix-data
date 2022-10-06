@@ -78,6 +78,8 @@ pub fn legacypkgs() -> Result<String> {
     Ok(format!("{}/legacypkgs.json", &*CACHEDIR))
 }
 
+/// Gets a list of all packages in NixOS systems with their attribute and version.
+/// The input `paths` should be the paths to the `configuration.nix` files containing `environment.systemPackages`
 pub fn getlegacypkgs(paths: &[&str]) -> Result<HashMap<String, String>> {
     getnixospkgs(paths, nixos::NixosType::Legacy)
 }

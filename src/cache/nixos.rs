@@ -69,6 +69,8 @@ pub fn nixospkgs() -> Result<String> {
     Ok(format!("{}/nixospkgs.json", &*CACHEDIR))
 }
 
+/// Downloads the latest 'options.json' for the system from the NixOS cache and returns the path to the file.
+/// Will only work on NixOS systems.
 pub fn nixosoptions() -> Result<String> {
     let versionout = Command::new("nixos-version").output()?;
     let numver = &String::from_utf8(versionout.stdout)?[0..5];
