@@ -56,7 +56,7 @@ pub fn legacypkgs() -> Result<String> {
     }
 
     let url = format!(
-        "https://releases.nixos.org/nixos-{}/nixos-{}/packages.json.br",
+        "https://releases.nixos.org/nixos/{}/nixos-{}/packages.json.br",
         relver, nixosversion
     );
 
