@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "nix-data"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "ijson",
@@ -665,8 +665,9 @@ dependencies = [
 
 [[package]]
 name = "nix-editor"
-version = "0.2.12"
-source = "git+https://github.com/vlinkz/nix-editor?branch=main#7aee02ebded8ab7d6405c9617706ff8e8b442fdf"
+version = "0.3.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54cc1d93deb37efb27faaf8ffbdf9d0a536a371fb0c1e9dae2bffe01ba55f65a"
 dependencies = [
  "clap 4.0.10",
  "nixpkgs-fmt",
