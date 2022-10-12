@@ -14,7 +14,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         naersk-lib = naersk.lib."${system}";
-      in
+      in rec
       {
         packages.nixeditor = naersk-lib.buildPackage {
           pname = "nix-data";
@@ -39,5 +39,12 @@
             pkg-config
           ];
         };
+
+        nixosModules.nix-data = ({ config, ... }: import ./modules/default.nix {
+          inherit pkgs;
+          inherit (pkgs) lib;
+          inherit config;
+        });
+        nixosModules.default = nixosModules.nix-data;
       });
 }
