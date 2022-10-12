@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::{Write, BufReader},
-    path::Path,
+    path::Path, process::Command,
 };
 use log::{info, debug};
 
@@ -111,7 +111,30 @@ pub fn nixpkgslatest() -> Result<String> {
         std::fs::create_dir_all(&*CACHEDIR)?;
     }
 
-    let verurl = String::from("https://channels.nixos.org/nixpkgs-unstable");
+    let mut nixpkgsver = None;
+    let regout = Command::new("nix")
+        .arg("registry")
+        .arg("list")
+        .output()?;
+    let reg = String::from_utf8(regout.stdout)?.replace("   ", " ");
+    for l in reg.split('\n') {
+        let parts = l.split(' ').collect::<Vec<_>>();
+        if let Some(x) = parts.get(1) {
+            if x == &"flake:nixpkgs" {
+                if let Some(x) = parts.get(2) {
+                    nixpkgsver = Some(x.to_string().replace("github:NixOS/nixpkgs/", ""));
+                    break;
+                }
+            }
+        }
+    }
+
+    let verurl = if let Some(v) = &nixpkgsver {
+        format!("https://channels.nixos.org/{}", v)
+    } else {
+        String::from("https://channels.nixos.org/nixpkgs-unstable")
+    };
+
     let resp = reqwest::blocking::get(&verurl)?;
     let latestnixpkgsver = resp
         .url()
@@ -130,7 +153,12 @@ pub fn nixpkgslatest() -> Result<String> {
         }
     }
 
-    let url = String::from("https://channels.nixos.org/nixpkgs-unstable/packages.json.br");
+    let url = if let Some(v) = &nixpkgsver {
+        format!("https://channels.nixos.org/{}/packages.json.br", v)
+    } else {
+        String::from("https://channels.nixos.org/nixpkgs-unstable/packages.json.br")
+    };
+    info!("Downloading {}", url);
 
     // Download file with reqwest blocking
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
@@ -144,7 +172,7 @@ pub fn nixpkgslatest() -> Result<String> {
         File::create(format!("{}/nixpkgs.ver", &*CACHEDIR))?
             .write_all(latestnixpkgsver.as_bytes())?;
     } else {
-        return Err(anyhow!("Failed to download nixpkgs-unstable packages.json"))
+        return Err(anyhow!("Failed to download nix profile packages.json"))
     }
 
     Ok(format!("{}/nixpkgs.json", &*CACHEDIR))
