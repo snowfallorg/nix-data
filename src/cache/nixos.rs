@@ -1,6 +1,7 @@
 use crate::CACHEDIR;
 use anyhow::{anyhow, Context, Result};
 use ijson::IString;
+use log::{info, debug};
 use serde::Deserialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -37,13 +38,13 @@ pub fn nixospkgs() -> Result<String> {
         .last()
         .context("Last element not found")?
         .to_string();
-    println!("latestnixosver: {}", latestnixosver);
+    info!("latestnixosver: {}", latestnixosver);
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR)) {
         if prevver == latestnixosver
             && Path::new(&format!("{}/nixospkgs.json", &*CACHEDIR)).exists()
         {
-            println!("No new version of NixOS found");
+            debug!("No new version of NixOS found");
             return Ok(format!("{}/nixospkgs.json", &*CACHEDIR));
         }
     }
@@ -94,13 +95,13 @@ pub fn nixosoptions() -> Result<String> {
         .last()
         .context("Last element not found")?
         .to_string();
-    println!("latestnixosver: {}", latestnixosver);
+    info!("latestnixosver: {}", latestnixosver);
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixosoptions.ver", &*CACHEDIR)) {
         if prevver == latestnixosver
             && Path::new(&format!("{}/nixosoptions.json", &*CACHEDIR)).exists()
         {
-            println!("No new version of NixOS found");
+            debug!("No new version of NixOS found");
             return Ok(format!("{}/nixosoptions.json", &*CACHEDIR));
         }
     }

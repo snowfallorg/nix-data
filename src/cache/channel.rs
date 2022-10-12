@@ -1,6 +1,7 @@
 use crate::CACHEDIR;
 use anyhow::{Context, Result, anyhow};
 use ijson::IString;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -50,7 +51,7 @@ pub fn legacypkgs() -> Result<String> {
         if prevver.eq(nixosversion)
             && Path::new(&format!("{}/legacypkgs.json", &*CACHEDIR)).exists()
         {
-            println!("No new version of NixOS legacy found");
+            info!("No new version of NixOS legacy found");
             return Ok(format!("{}/legacypkgs.json", &*CACHEDIR));
         }
     }

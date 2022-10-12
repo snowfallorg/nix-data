@@ -8,6 +8,7 @@ use std::{
     io::{Write, BufReader},
     path::Path,
 };
+use log::{info, debug};
 
 #[derive(Debug, Deserialize)]
 struct ProfilePkgsRoot {
@@ -87,6 +88,7 @@ pub fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
     let latestpkgs = if Path::new(&format!("{}/nixpkgs.json", &*CACHEDIR)).exists() {
         format!("{}/nixpkgs.json", &*CACHEDIR)
     } else {
+        // Change to something else if overridden
         nixpkgslatest()?
     };
     let pkgs: HashMap<IString, NixPkg> = serde_json::from_reader(BufReader::new(File::open(latestpkgs)?))?;
@@ -118,12 +120,12 @@ pub fn nixpkgslatest() -> Result<String> {
         .last()
         .context("Last element not found")?
         .to_string();
-    println!("latestnixpkgsver: {}", latestnixpkgsver);
+    info!("latestnixpkgsver: {}", latestnixpkgsver);
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixpkgs.ver", &*CACHEDIR)) {
         if prevver == latestnixpkgsver && Path::new(&format!("{}/nixpkgs.json", &*CACHEDIR)).exists()
         {
-            println!("No new version of nixpkgs found");
+            debug!("No new version of nixpkgs found");
             return Ok(format!("{}/nixpkgs.json", &*CACHEDIR));
         }
     }

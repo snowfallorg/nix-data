@@ -1,6 +1,7 @@
 use crate::CACHEDIR;
 use anyhow::{Context, Result};
 use ijson::IString;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -35,7 +36,7 @@ pub fn flakespkgs() -> Result<String> {
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/flakespkgs.ver", &*CACHEDIR)) {
         if prevver.eq(nixosversion) && Path::new(&format!("{}/flakespkgs.json", &*CACHEDIR)).exists() {
-            println!("No new version of NixOS flakes found");
+            info!("No new version of NixOS flakes found");
             return Ok(format!("{}/flakespkgs.json", &*CACHEDIR));
         }
     }

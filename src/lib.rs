@@ -31,6 +31,6 @@ pub mod config;
 lazy_static::lazy_static! {
     static ref CACHEDIR: String = format!("{}/.cache/nix-data/", std::env::var("HOME").unwrap());
     static ref CONFIGDIR: String = format!("{}/.config/nix-data/", std::env::var("HOME").unwrap());
-    static ref CONFIG: String = format!("{}/config.json", &*CONFIGDIR);
+    static ref CONFIG: String = format!("{}config.json", &*CONFIGDIR);
 }
 static SYSCONFIG: &str = "/etc/nix-data/config.json";
