@@ -22,6 +22,7 @@
           buildInputs = with pkgs; [
             openssl
             pkg-config
+            sqlite
           ];
         };
 
@@ -37,6 +38,7 @@
             clippy
             openssl
             pkg-config
+            sqlite
           ];
         };
       });

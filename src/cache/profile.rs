@@ -1,7 +1,8 @@
-use crate::CACHEDIR;
+use crate::{CACHEDIR, cache::{NixPkgList, nixos}};
 use anyhow::{Context, Result, anyhow};
 use ijson::IString;
 use serde::{Deserialize, Serialize};
+use sqlx::{QueryBuilder, Sqlite, SqlitePool, migrate::MigrateDatabase, Row};
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -83,19 +84,29 @@ struct NixPkg {
 
 /// Returns a list of all packages installed with `nix profile` with their name and version.
 /// Takes significantly longer than [getprofilepkgs()].
-pub fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
+pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
     let profilepkgs = getprofilepkgs()?;
-    let latestpkgs = if Path::new(&format!("{}/nixpkgs.json", &*CACHEDIR)).exists() {
-        format!("{}/nixpkgs.json", &*CACHEDIR)
+    let latestpkgs = if Path::new(&format!("{}/nixpkgs.db", &*CACHEDIR)).exists() {
+        format!("{}/nixpkgs.db", &*CACHEDIR)
     } else {
         // Change to something else if overridden
-        nixpkgslatest()?
+        nixpkgslatest().await?
     };
-    let pkgs: HashMap<IString, NixPkg> = serde_json::from_reader(BufReader::new(File::open(latestpkgs)?))?;
     let mut out = HashMap::new();
+    let pool = SqlitePool::connect(&format!("sqlite://{}", latestpkgs)).await?;
     for (pkg, v) in profilepkgs {
-        if let Some(nixpkg) = pkgs.get(&IString::from(pkg.to_string())) {
-            if let Some(version) = v.name.strip_prefix(&format!("{}-", nixpkg.pname.as_str())) {
+        let mut sqlout = sqlx::query(
+            r#"
+            SELECT pname FROM pkgs WHERE attribute = $1
+            "#,
+        )
+        .bind(&pkg)
+        .fetch_all(&pool)
+        .await?;
+        if sqlout.len() == 1 {
+            let row = sqlout.pop().unwrap();
+            let pname: String = row.get("pname");
+            if let Some(version) = v.name.strip_prefix(&format!("{}-", pname.as_str())) {
                 out.insert(pkg, version.to_string());
             }
         }
@@ -105,7 +116,7 @@ pub fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
 
 /// Downloads the latest `packages.json` from nixpkgs-unstable
 /// and returns the path to the file.
-pub fn nixpkgslatest() -> Result<String> {
+pub async fn nixpkgslatest() -> Result<String> {
     // If cache directory doesn't exist, create it
     if !std::path::Path::new(&*CACHEDIR).exists() {
         std::fs::create_dir_all(&*CACHEDIR)?;
@@ -146,10 +157,10 @@ pub fn nixpkgslatest() -> Result<String> {
     info!("latestnixpkgsver: {}", latestnixpkgsver);
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixpkgs.ver", &*CACHEDIR)) {
-        if prevver == latestnixpkgsver && Path::new(&format!("{}/nixpkgs.json", &*CACHEDIR)).exists()
+        if prevver == latestnixpkgsver && Path::new(&format!("{}/nixpkgs.db", &*CACHEDIR)).exists()
         {
             debug!("No new version of nixpkgs found");
-            return Ok(format!("{}/nixpkgs.json", &*CACHEDIR));
+            return Ok(format!("{}/nixpkgs.db", &*CACHEDIR));
         }
     }
 
@@ -164,16 +175,12 @@ pub fn nixpkgslatest() -> Result<String> {
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
-        let mut out = File::create(&format!("{}/nixpkgs.json", &*CACHEDIR))?;
-        let output: NixPkgListOut = serde_json::from_slice(&resp.bytes()?)?;
-        let outjson = serde_json::to_string(&output.packages)?;
-        out.write_all(outjson.as_bytes())?;
-        // Write version downloaded to file
-        File::create(format!("{}/nixpkgs.ver", &*CACHEDIR))?
-            .write_all(latestnixpkgsver.as_bytes())?;
+        let db = format!("sqlite://{}/nixpkgs.db", &*CACHEDIR);
+        let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
+        nixos::createdb(&db, &pkgjson).await?;
     } else {
         return Err(anyhow!("Failed to download nix profile packages.json"))
     }
 
-    Ok(format!("{}/nixpkgs.json", &*CACHEDIR))
+    Ok(format!("{}/nixpkgs.db", &*CACHEDIR))
 }

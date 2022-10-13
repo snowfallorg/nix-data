@@ -1,34 +1,23 @@
 use crate::CACHEDIR;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use ijson::IString;
 use log::info;
 use serde::{Deserialize, Serialize};
+use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, QueryBuilder};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::Write,
+    io::{Write, BufReader},
     path::Path,
     process::Command,
 };
 
-use super::nixos::{getnixospkgs, self};
-
-#[derive(Debug, Deserialize)]
-struct LegacyPkgList {
-    packages: HashMap<IString, LegacyPkg>
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct LegacyPkg {
-    name: IString,
-    pname: IString,
-    version: IString,
-}
+use super::{nixos::{self, getnixospkgs}, NixPkgList};
 
 /// Gets a list of all packages in legacy NixOS systems with their name and version.
 /// Can be used to find what versions of system packages are currently installed.
 /// Will only work on legacy NixOS systems.
-pub fn legacypkgs() -> Result<String> {
+pub async fn legacypkgs() -> Result<String> {
     let versionout = Command::new("nixos-version").arg("--json").output()?;
     let version: HashMap<String, String> = serde_json::from_slice(&versionout.stdout)?;
 
@@ -49,10 +38,10 @@ pub fn legacypkgs() -> Result<String> {
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/legacypkgs.ver", &*CACHEDIR)) {
         if prevver.eq(nixosversion)
-            && Path::new(&format!("{}/legacypkgs.json", &*CACHEDIR)).exists()
+            && Path::new(&format!("{}/legacypkgs.db", &*CACHEDIR)).exists()
         {
             info!("No new version of NixOS legacy found");
-            return Ok(format!("{}/legacypkgs.json", &*CACHEDIR));
+            return Ok(format!("{}/legacypkgs.db", &*CACHEDIR));
         }
     }
 
@@ -65,24 +54,21 @@ pub fn legacypkgs() -> Result<String> {
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
-        let mut out = File::create(&format!("{}/legacypkgs.json", &*CACHEDIR))?;
-        let json: LegacyPkgList = serde_json::from_slice(&resp.bytes()?)?;
-        let outjson = serde_json::to_string(&json.packages)?;
-        out.write_all(outjson.as_bytes())?;
-        // Write version downloaded to file
-        File::create(format!("{}/legacypkgs.ver", &*CACHEDIR))?
-            .write_all(nixosversion.as_bytes())?;
+        let db = format!("sqlite://{}/legacypkgs.db", &*CACHEDIR);
+        let pkgjson: NixPkgList =
+        serde_json::from_reader(BufReader::new(resp))?;
+        nixos::createdb(&db, &pkgjson);
     } else {
-        return Err(anyhow!("Failed to download legacy packages.json"))
+        return Err(anyhow!("Failed to download legacy packages.json"));
     }
 
-    Ok(format!("{}/legacypkgs.json", &*CACHEDIR))
+    Ok(format!("{}/legacypkgs.db", &*CACHEDIR))
 }
 
 /// Gets a list of all packages in NixOS systems with their attribute and version.
 /// The input `paths` should be the paths to the `configuration.nix` files containing `environment.systemPackages`
-pub fn getlegacypkgs(paths: &[&str]) -> Result<HashMap<String, String>> {
-    getnixospkgs(paths, nixos::NixosType::Legacy)
+pub async fn getlegacypkgs(paths: &[&str]) -> Result<HashMap<String, String>> {
+    getnixospkgs(paths, nixos::NixosType::Legacy).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,10 +81,7 @@ struct EnvPkgOut {
 /// Due to limitations of `nix-env`, the HashMap keys are the packages `pname` rather than `attributePath`.
 /// This means that finding more information about the specific derivations is more difficult.
 pub fn getenvpkgs() -> Result<HashMap<String, String>> {
-    let output = Command::new("nix-env")
-        .arg("-q")
-        .arg("--json")
-        .output()?;
+    let output = Command::new("nix-env").arg("-q").arg("--json").output()?;
     let pkgs: HashMap<String, EnvPkgOut> = serde_json::from_slice(&output.stdout)?;
     let mut out = HashMap::new();
     for (_, v) in pkgs {
