@@ -54,10 +54,10 @@ pub async fn legacypkgs() -> Result<String> {
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
-        let db = format!("sqlite://{}/legacypkgs.db", &*CACHEDIR);
+        let dbfile = format!("{}/legacypkgs.db", &*CACHEDIR);
         let pkgjson: NixPkgList =
         serde_json::from_reader(BufReader::new(resp))?;
-        nixos::createdb(&db, &pkgjson);
+        nixos::createdb(&dbfile, &pkgjson);
     } else {
         return Err(anyhow!("Failed to download legacy packages.json"));
     }

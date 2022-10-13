@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use ijson::IString;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Cache and determine packages installed on legacy NixOS and with `nix-env`
 pub mod channel;
@@ -46,7 +47,7 @@ struct Meta {
     #[serde(rename = "longDescription")]
     pub longdescription: Option<IString>,
     pub homepage: Option<StrOrVec>,
-    pub maintainers: Option<ijson::IValue>,
+    pub maintainers: Option<Value>,
     pub position: Option<IString>,
     pub license: Option<LicenseEnum>,
     pub platforms: Option<Platform>

@@ -1,5 +1,5 @@
 use crate::{
-    cache::{NixPkgList, NixosPkgList},
+    cache::{NixPkgList, NixosPkgList, StrOrVec},
     CACHEDIR,
 };
 use anyhow::{anyhow, Context, Result};
@@ -85,17 +85,22 @@ pub async fn nixospkgs() -> Result<String> {
         .await?;
         sqlx::query(
             r#"
-                CREATE TABLE "meta" (
-                    "attribute"	TEXT NOT NULL UNIQUE,
-                    "broken"	INTEGER,
-                    "insecure"	INTEGER,
-                    "unsupported"	INTEGER,
-                    "unfree"	INTEGER,
-                    "description"	TEXT,
-                    "longdescription"	TEXT,
-                    FOREIGN KEY("attribute") REFERENCES "pkgs"("attribute"),
-                    PRIMARY KEY("attribute")
-                )
+            CREATE TABLE "meta" (
+                "attribute"	TEXT NOT NULL UNIQUE,
+                "broken"	INTEGER,
+                "insecure"	INTEGER,
+                "unsupported"	INTEGER,
+                "unfree"	INTEGER,
+                "description"	TEXT,
+                "longdescription"	TEXT,
+                "homepage"	TEXT,
+                "maintainers"	JSON,
+                "position"	TEXT,
+                "license"	JSON,
+                "platforms"	JSON,
+                FOREIGN KEY("attribute") REFERENCES "pkgs"("attribute"),
+                PRIMARY KEY("attribute")
+            )
                 "#,
         )
         .execute(&pool)
@@ -126,9 +131,7 @@ pub async fn nixospkgs() -> Result<String> {
         let cmd_stdin = cmd.stdin.as_mut().unwrap();
         cmd_stdin.write_all(data.as_bytes())?;
         let _status = cmd.wait()?;
-
         let mut metawtr = csv::Writer::from_writer(vec![]);
-        // metawtr.write_record(&["attribute", "broken", "insecure", "unsupported", "unfree", "description", "longdescription"])?;
         for (pkg, data) in &pkgjson.packages {
             metawtr.serialize((
                 pkg,
@@ -138,6 +141,11 @@ pub async fn nixospkgs() -> Result<String> {
                 data.meta.unfree,
                 data.meta.description.as_ref().map(|x| x.to_string()),
                 data.meta.longdescription.as_ref().map(|x| x.to_string()),
+                data.meta.homepage.as_ref().and_then(|x| match x { StrOrVec::List(x) => x.first().map(|x| x.to_string()), StrOrVec::Single(x) => Some(x.to_string())}),
+                data.meta.maintainers.as_ref().and_then(|x| match serde_json::to_string(x) { Ok(x) => Some(x), Err(_) => None }),
+                data.meta.position.as_ref().map(|x| x.to_string()),
+                data.meta.license.as_ref().and_then(|x| match serde_json::to_string(x) { Ok(x) => Some(x), Err(_) => None }),
+                data.meta.platforms.as_ref().and_then(|x| match serde_json::to_string(x) { Ok(x) => Some(x), Err(_) => None }),
             ))?;
         }
         let metadata = String::from_utf8(metawtr.into_inner()?)?;
@@ -263,16 +271,15 @@ pub(super) async fn getnixospkgs(
     Ok(out)
 }
 
-pub(super) async fn createdb(db: &str, pkgjson: &NixPkgList) -> Result<()> {
-    // if !Sqlite::database_exists(db).await? {
-        // CHANGE db FROM sqlite:// TO /
-        if Path::new(&format!("{}/{}", &*CACHEDIR, db)).exists() {
-            fs::remove_file(&format!("{}/{}", &*CACHEDIR, db))?;
-        }
-        Sqlite::create_database(db).await?;
-        let pool = SqlitePool::connect(db).await?;
-        sqlx::query(
-            r#"
+pub(super) async fn createdb(dbfile: &str, pkgjson: &NixPkgList) -> Result<()> {
+    let db = format!("sqlite://{}", dbfile);
+    if Path::new(dbfile).exists() {
+        fs::remove_file(dbfile)?;
+    }
+    Sqlite::create_database(&db).await?;
+    let pool = SqlitePool::connect(&db).await?;
+    sqlx::query(
+        r#"
             CREATE TABLE "pkgs" (
                 "attribute"	TEXT NOT NULL UNIQUE,
                 "pname"	TEXT,
@@ -280,13 +287,11 @@ pub(super) async fn createdb(db: &str, pkgjson: &NixPkgList) -> Result<()> {
                 PRIMARY KEY("attribute")
             )
             "#,
-        )
-        .execute(&pool)
-        .await?;
-    // }
+    )
+    .execute(&pool)
+    .await?;
 
     let mut wtr = csv::Writer::from_writer(vec![]);
-    // wtr.write_record(&["attribute", "pname", "version"])?;
     for (pkg, data) in &pkgjson.packages {
         wtr.serialize((pkg, data.pname.to_string(), data.version.to_string()))?;
     }

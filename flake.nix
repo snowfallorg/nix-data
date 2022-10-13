@@ -19,11 +19,15 @@
         packages.nixeditor = naersk-lib.buildPackage {
           pname = "nix-data";
           root = ./.;
+          nativeBuildInputs = with pkgs; [ makeWrapper ];
           buildInputs = with pkgs; [
             openssl
             pkg-config
             sqlite
           ];
+          postInstall = ''
+            wrapProgram $out/bin/nix-data --prefix PATH : '${pkgs.lib.makeBinPath [ pkgs.sqlite ]}'
+          '';
         };
 
         defaultPackage = self.packages.${system}.nixeditor;

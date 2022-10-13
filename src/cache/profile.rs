@@ -183,9 +183,9 @@ pub async fn nixpkgslatest() -> Result<String> {
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
-        let db = format!("sqlite://{}/nixpkgs.db", &*CACHEDIR);
+        let dbfile = format!("{}/nixpkgs.db", &*CACHEDIR);
         let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
-        nixos::createdb(&db, &pkgjson).await?;
+        nixos::createdb(&dbfile, &pkgjson).await?;
     } else {
         return Err(anyhow!("Failed to download nix profile packages.json"))
     }

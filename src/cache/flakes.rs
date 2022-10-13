@@ -69,8 +69,8 @@ pub async fn flakespkgs() -> Result<String> {
         })
         .collect::<HashMap<_, _>>();
 
-    let db = format!("sqlite://{}/flakespkgs.db", &*CACHEDIR);
-    nixos::createdb(&db, &NixPkgList { packages: pkgsjson }).await?;
+    let dbfile = format!("{}/flakespkgs.db", &*CACHEDIR);
+    nixos::createdb(&dbfile, &NixPkgList { packages: pkgsjson }).await?;
 
     // Write version downloaded to file
     File::create(format!("{}/flakespkgs.ver", &*CACHEDIR))?.write_all(nixosversion.as_bytes())?;
