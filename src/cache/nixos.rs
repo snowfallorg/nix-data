@@ -1,22 +1,24 @@
-use crate::{cache::NixPkgList, CACHEDIR};
+use crate::{
+    cache::{NixPkgList, NixosPkgList},
+    CACHEDIR,
+};
 use anyhow::{anyhow, Context, Result};
 use ijson::IString;
 use log::{debug, info};
 use serde::Deserialize;
-use sqlx::{migrate::MigrateDatabase, QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{migrate::MigrateDatabase, Execute, QueryBuilder, Row, Sqlite, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     io::{BufReader, Write},
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
 };
 
 use super::{channel, flakes};
 
 /// Downloads the latest `packages.json` for the system from the NixOS cache and returns the path to the file.
 /// Will only work on NixOS systems.
-#[tokio::main]
 pub async fn nixospkgs() -> Result<String> {
     let versionout = Command::new("nixos-version").output()?;
     let numver = &String::from_utf8(versionout.stdout)?[0..5];
@@ -62,11 +64,14 @@ pub async fn nixospkgs() -> Result<String> {
         // resp is pkgsjson
         let db = format!("sqlite://{}/nixospkgs.db", &*CACHEDIR);
 
-        if !Sqlite::database_exists(&db).await? {
-            Sqlite::create_database(&db).await?;
-            let pool = SqlitePool::connect(&db).await?;
-            sqlx::query(
-                r#"
+        // if !Sqlite::database_exists(&db).await? {
+        if Path::new(&format!("{}/nixospkgs.db", &*CACHEDIR)).exists() {
+            fs::remove_file(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
+        }
+        Sqlite::create_database(&db).await?;
+        let pool = SqlitePool::connect(&db).await?;
+        sqlx::query(
+            r#"
                 CREATE TABLE "pkgs" (
                     "attribute"	TEXT NOT NULL UNIQUE,
                     "system"	TEXT,
@@ -75,11 +80,11 @@ pub async fn nixospkgs() -> Result<String> {
                     PRIMARY KEY("attribute")
                 )
                 "#,
-            )
-            .execute(&pool)
-            .await?;
-            sqlx::query(
-                r#"
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            r#"
                 CREATE TABLE "meta" (
                     "attribute"	TEXT NOT NULL UNIQUE,
                     "broken"	INTEGER,
@@ -92,32 +97,62 @@ pub async fn nixospkgs() -> Result<String> {
                     PRIMARY KEY("attribute")
                 )
                 "#,
-            )
-            .execute(&pool)
-            .await?;
-        }
+        )
+        .execute(&pool)
+        .await?;
+        // }
 
-        let pool = SqlitePool::connect(&db).await?;
-
-        let pkgjson: NixPkgList =
+        let pkgjson: NixosPkgList =
             serde_json::from_reader(BufReader::new(resp)).expect("Failed to parse packages.json");
 
-        let pkgvec = pkgjson.packages.iter().collect::<Vec<_>>();
-        let pkgchunks = pkgvec.chunks(10000);
-
-        for chunk in pkgchunks {
-            let mut query_builder: QueryBuilder<Sqlite> =
-                QueryBuilder::new("INSERT OR REPLACE INTO pkgs(attribute, pname, version) ");
-            query_builder.push_values(chunk, |mut b, (pkg, data)| {
-                b.push_bind(pkg)
-                    .push_bind(data.pname.to_string())
-                    .push_bind(data.version.to_string());
-            });
-            let query = query_builder.build();
-            let args = query.execute(&pool).await?;
-
-            println!("{}", args.rows_affected());
+        println!("Starting to insert packages");
+        let mut wtr = csv::Writer::from_writer(vec![]);
+        // wtr.write_record(&["attribute", "system", "pname", "version"])?;
+        for (pkg, data) in &pkgjson.packages {
+            wtr.serialize((
+                pkg,
+                data.system.to_string(),
+                data.pname.to_string(),
+                data.version.to_string(),
+            ))?;
         }
+        let data = String::from_utf8(wtr.into_inner()?)?;
+        let mut cmd = Command::new("sqlite3")
+            .arg("-csv")
+            .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
+            .arg(".import '|cat -' pkgs")
+            .stdin(Stdio::piped())
+            .spawn()?;
+        let cmd_stdin = cmd.stdin.as_mut().unwrap();
+        cmd_stdin.write_all(data.as_bytes())?;
+        let _status = cmd.wait()?;
+
+        let mut metawtr = csv::Writer::from_writer(vec![]);
+        // metawtr.write_record(&["attribute", "broken", "insecure", "unsupported", "unfree", "description", "longdescription"])?;
+        for (pkg, data) in &pkgjson.packages {
+            metawtr.serialize((
+                pkg,
+                data.meta.broken,
+                data.meta.insecure,
+                data.meta.unsupported,
+                data.meta.unfree,
+                data.meta.description.as_ref().map(|x| x.to_string()),
+                data.meta.longdescription.as_ref().map(|x| x.to_string()),
+            ))?;
+        }
+        let metadata = String::from_utf8(metawtr.into_inner()?)?;
+        let mut metacmd = Command::new("sqlite3")
+            .arg("-csv")
+            .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
+            .arg(".import '|cat -' meta")
+            .stdin(Stdio::piped())
+            .spawn()?;
+        let metacmd_stdin = metacmd.stdin.as_mut().unwrap();
+        metacmd_stdin.write_all(metadata.as_bytes())?;
+        let _status = metacmd.wait()?;
+        // Write version downloaded to file
+        File::create(format!("{}/nixospkgs.ver", &*CACHEDIR))?
+            .write_all(latestnixosver.as_bytes())?;
     } else {
         return Err(anyhow!("Failed to download latest packages.json"));
     }
@@ -228,10 +263,14 @@ pub(super) async fn getnixospkgs(
     Ok(out)
 }
 
-pub async fn createdb(db: &str, pkgjson: &NixPkgList) -> Result<()> {
-    if !Sqlite::database_exists(&db).await? {
-        Sqlite::create_database(&db).await?;
-        let pool = SqlitePool::connect(&db).await?;
+pub(super) async fn createdb(db: &str, pkgjson: &NixPkgList) -> Result<()> {
+    // if !Sqlite::database_exists(db).await? {
+        // CHANGE db FROM sqlite:// TO /
+        if Path::new(&format!("{}/{}", &*CACHEDIR, db)).exists() {
+            fs::remove_file(&format!("{}/{}", &*CACHEDIR, db))?;
+        }
+        Sqlite::create_database(db).await?;
+        let pool = SqlitePool::connect(db).await?;
         sqlx::query(
             r#"
             CREATE TABLE "pkgs" (
@@ -244,24 +283,22 @@ pub async fn createdb(db: &str, pkgjson: &NixPkgList) -> Result<()> {
         )
         .execute(&pool)
         .await?;
+    // }
+
+    let mut wtr = csv::Writer::from_writer(vec![]);
+    // wtr.write_record(&["attribute", "pname", "version"])?;
+    for (pkg, data) in &pkgjson.packages {
+        wtr.serialize((pkg, data.pname.to_string(), data.version.to_string()))?;
     }
-    let pool = SqlitePool::connect(&db).await?;
-
-    let pkgvec = pkgjson.packages.iter().collect::<Vec<_>>();
-    let pkgchunks = pkgvec.chunks(10000);
-
-    for chunk in pkgchunks {
-        let mut query_builder: QueryBuilder<Sqlite> =
-            QueryBuilder::new("INSERT OR REPLACE INTO pkgs(attribute, pname, version) ");
-        query_builder.push_values(chunk, |mut b, (pkg, data)| {
-            b.push_bind(pkg.to_string())
-                .push_bind(data.pname.to_string())
-                .push_bind(data.version.to_string());
-        });
-        let query = query_builder.build();
-        let args = query.execute(&pool).await?;
-
-        println!("{}", args.rows_affected());
-    }
+    let data = String::from_utf8(wtr.into_inner()?)?;
+    let mut cmd = Command::new("sqlite3")
+        .arg("-csv")
+        .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
+        .arg(".import '|cat -' pkgs")
+        .stdin(Stdio::piped())
+        .spawn()?;
+    let cmd_stdin = cmd.stdin.as_mut().unwrap();
+    cmd_stdin.write_all(data.as_bytes())?;
+    let _status = cmd.wait()?;
     Ok(())
 }

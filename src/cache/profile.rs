@@ -97,6 +97,14 @@ pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
     for (pkg, v) in profilepkgs {
         let mut sqlout = sqlx::query(
             r#"
+            .headers on
+            "#,
+        )
+        .bind(&pkg)
+        .fetch_all(&pool)
+        .await?;
+        let mut sqlout = sqlx::query(
+            r#"
             SELECT pname FROM pkgs WHERE attribute = $1
             "#,
         )
