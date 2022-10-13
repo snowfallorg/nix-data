@@ -70,18 +70,6 @@ pub fn getprofilepkgs() -> Result<HashMap<String, ProfilePkg>> {
     Ok(out)
 }
 
-#[derive(Debug, Deserialize)]
-struct NixPkgListOut {
-    packages: HashMap<IString, NixPkg>
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct NixPkg {
-    name: IString,
-    pname: IString,
-    version: IString,
-}
-
 /// Returns a list of all packages installed with `nix profile` with their name and version.
 /// Takes significantly longer than [getprofilepkgs()].
 pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
@@ -95,14 +83,6 @@ pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
     let mut out = HashMap::new();
     let pool = SqlitePool::connect(&format!("sqlite://{}", latestpkgs)).await?;
     for (pkg, v) in profilepkgs {
-        let mut sqlout = sqlx::query(
-            r#"
-            .headers on
-            "#,
-        )
-        .bind(&pkg)
-        .fetch_all(&pool)
-        .await?;
         let mut sqlout = sqlx::query(
             r#"
             SELECT pname FROM pkgs WHERE attribute = $1

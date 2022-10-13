@@ -2,5 +2,5 @@ use nix_data::cache;
 
 #[tokio::main]
 async fn main() {
-    println!("{:?}", cache::nixos::nixospkgs().await);
+    println!("{:?}", cache::profile::getprofilepkgs_versioned().await);
 }

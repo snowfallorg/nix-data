@@ -298,7 +298,7 @@ pub(super) async fn createdb(dbfile: &str, pkgjson: &NixPkgList) -> Result<()> {
     let data = String::from_utf8(wtr.into_inner()?)?;
     let mut cmd = Command::new("sqlite3")
         .arg("-csv")
-        .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
+        .arg(&dbfile)
         .arg(".import '|cat -' pkgs")
         .stdin(Stdio::piped())
         .spawn()?;
