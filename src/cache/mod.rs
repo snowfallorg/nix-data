@@ -50,7 +50,7 @@ struct Meta {
     pub maintainers: Option<Value>,
     pub position: Option<IString>,
     pub license: Option<LicenseEnum>,
-    pub platforms: Option<Platform>
+    pub platforms: Option<Platform>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -75,7 +75,7 @@ enum LicenseEnum {
     List(Vec<License>),
     SingleStr(IString),
     VecStr(Vec<IString>),
-    Mixed(Vec<LicenseEnum>)
+    Mixed(Vec<LicenseEnum>),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -93,5 +93,5 @@ struct PkgMaintainer {
     pub email: Option<IString>,
     pub github: Option<IString>,
     pub matrix: Option<IString>,
-    pub name: Option<IString>
+    pub name: Option<IString>,
 }

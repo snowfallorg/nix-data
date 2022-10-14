@@ -1,9 +1,6 @@
 use crate::CACHEDIR;
 use anyhow::{Context, Result};
-use ijson::IString;
 use log::info;
-use serde::{Deserialize, Serialize};
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, QueryBuilder};
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -12,7 +9,10 @@ use std::{
     process::Command,
 };
 
-use super::{nixos::{self, getnixospkgs}, NixPkg, NixPkgList};
+use super::{
+    nixos::{self, getnixospkgs},
+    NixPkg, NixPkgList,
+};
 
 /// Gets a list of all packages in the NixOS system with their name and version.
 /// Can be used to find what versions of system packages are currently installed.
@@ -32,8 +32,7 @@ pub async fn flakespkgs() -> Result<String> {
 
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/flakespkgs.ver", &*CACHEDIR)) {
-        if prevver.eq(nixosversion)
-            && Path::new(&format!("{}/flakespkgs.db", &*CACHEDIR)).exists()
+        if prevver.eq(nixosversion) && Path::new(&format!("{}/flakespkgs.db", &*CACHEDIR)).exists()
         {
             info!("No new version of NixOS flakes found");
             return Ok(format!("{}/flakespkgs.db", &*CACHEDIR));
@@ -61,12 +60,7 @@ pub async fn flakespkgs() -> Result<String> {
         serde_json::from_str(&String::from_utf8(pkgsout.stdout)?)?;
     pkgsjson = pkgsjson
         .iter()
-        .map(|(k, v)| {
-            (
-                k.split('.').collect::<Vec<_>>()[2..].join("."),
-                v.clone(),
-            )
-        })
+        .map(|(k, v)| (k.split('.').collect::<Vec<_>>()[2..].join("."), v.clone()))
         .collect::<HashMap<_, _>>();
 
     let dbfile = format!("{}/flakespkgs.db", &*CACHEDIR);

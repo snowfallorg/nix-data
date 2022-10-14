@@ -3,10 +3,8 @@ use crate::{
     CACHEDIR,
 };
 use anyhow::{anyhow, Context, Result};
-use ijson::IString;
 use log::{debug, info};
-use serde::Deserialize;
-use sqlx::{migrate::MigrateDatabase, Execute, QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -59,12 +57,11 @@ pub async fn nixospkgs() -> Result<String> {
 
     // Download file with reqwest blocking
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let mut resp = client.get(url).send()?;
+    let resp = client.get(url).send()?;
     if resp.status().is_success() {
         // resp is pkgsjson
         let db = format!("sqlite://{}/nixospkgs.db", &*CACHEDIR);
 
-        // if !Sqlite::database_exists(&db).await? {
         if Path::new(&format!("{}/nixospkgs.db", &*CACHEDIR)).exists() {
             fs::remove_file(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
         }
@@ -105,14 +102,12 @@ pub async fn nixospkgs() -> Result<String> {
         )
         .execute(&pool)
         .await?;
-        // }
 
         let pkgjson: NixosPkgList =
             serde_json::from_reader(BufReader::new(resp)).expect("Failed to parse packages.json");
 
         println!("Starting to insert packages");
         let mut wtr = csv::Writer::from_writer(vec![]);
-        // wtr.write_record(&["attribute", "system", "pname", "version"])?;
         for (pkg, data) in &pkgjson.packages {
             wtr.serialize((
                 pkg,
@@ -135,17 +130,70 @@ pub async fn nixospkgs() -> Result<String> {
         for (pkg, data) in &pkgjson.packages {
             metawtr.serialize((
                 pkg,
-                data.meta.broken,
-                data.meta.insecure,
-                data.meta.unsupported,
-                data.meta.unfree,
+                if let Some(x) = data.meta.broken {
+                    if x {
+                        1
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                },
+                if let Some(x) = data.meta.insecure {
+                    if x {
+                        1
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                },
+                if let Some(x) = data.meta.unsupported {
+                    if x {
+                        1
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                },
+                if let Some(x) = data.meta.unfree {
+                    if x {
+                        1
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                },
                 data.meta.description.as_ref().map(|x| x.to_string()),
                 data.meta.longdescription.as_ref().map(|x| x.to_string()),
-                data.meta.homepage.as_ref().and_then(|x| match x { StrOrVec::List(x) => x.first().map(|x| x.to_string()), StrOrVec::Single(x) => Some(x.to_string())}),
-                data.meta.maintainers.as_ref().and_then(|x| match serde_json::to_string(x) { Ok(x) => Some(x), Err(_) => None }),
+                data.meta.homepage.as_ref().and_then(|x| match x {
+                    StrOrVec::List(x) => x.first().map(|x| x.to_string()),
+                    StrOrVec::Single(x) => Some(x.to_string()),
+                }),
+                data.meta
+                    .maintainers
+                    .as_ref()
+                    .and_then(|x| match serde_json::to_string(x) {
+                        Ok(x) => Some(x),
+                        Err(_) => None,
+                    }),
                 data.meta.position.as_ref().map(|x| x.to_string()),
-                data.meta.license.as_ref().and_then(|x| match serde_json::to_string(x) { Ok(x) => Some(x), Err(_) => None }),
-                data.meta.platforms.as_ref().and_then(|x| match serde_json::to_string(x) { Ok(x) => Some(x), Err(_) => None }),
+                data.meta
+                    .license
+                    .as_ref()
+                    .and_then(|x| match serde_json::to_string(x) {
+                        Ok(x) => Some(x),
+                        Err(_) => None,
+                    }),
+                data.meta
+                    .platforms
+                    .as_ref()
+                    .and_then(|x| match serde_json::to_string(x) {
+                        Ok(x) => Some(x),
+                        Err(_) => None,
+                    }),
             ))?;
         }
         let metadata = String::from_utf8(metawtr.into_inner()?)?;

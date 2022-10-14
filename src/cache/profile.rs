@@ -1,15 +1,18 @@
-use crate::{CACHEDIR, cache::{NixPkgList, nixos}};
-use anyhow::{Context, Result, anyhow};
-use ijson::IString;
-use serde::{Deserialize, Serialize};
-use sqlx::{QueryBuilder, Sqlite, SqlitePool, migrate::MigrateDatabase, Row};
+use crate::{
+    cache::{nixos, NixPkgList},
+    CACHEDIR,
+};
+use anyhow::{anyhow, Context, Result};
+use log::{debug, info};
+use serde::Deserialize;
+use sqlx::{Row, SqlitePool};
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{Write, BufReader},
-    path::Path, process::Command,
+    io::{BufReader, Write},
+    path::Path,
+    process::Command,
 };
-use log::{info, debug};
 
 #[derive(Debug, Deserialize)]
 struct ProfilePkgsRoot {
@@ -111,10 +114,7 @@ pub async fn nixpkgslatest() -> Result<String> {
     }
 
     let mut nixpkgsver = None;
-    let regout = Command::new("nix")
-        .arg("registry")
-        .arg("list")
-        .output()?;
+    let regout = Command::new("nix").arg("registry").arg("list").output()?;
     let reg = String::from_utf8(regout.stdout)?.replace("   ", " ");
     for l in reg.split('\n') {
         let parts = l.split(' ').collect::<Vec<_>>();
@@ -166,8 +166,11 @@ pub async fn nixpkgslatest() -> Result<String> {
         let dbfile = format!("{}/nixpkgs.db", &*CACHEDIR);
         let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
         nixos::createdb(&dbfile, &pkgjson).await?;
+        // Write version downloaded to file
+        File::create(format!("{}/nixpkgs.ver", &*CACHEDIR))?
+            .write_all(latestnixpkgsver.as_bytes())?;
     } else {
-        return Err(anyhow!("Failed to download nix profile packages.json"))
+        return Err(anyhow!("Failed to download nix profile packages.json"));
     }
 
     Ok(format!("{}/nixpkgs.db", &*CACHEDIR))

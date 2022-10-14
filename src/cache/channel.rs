@@ -1,18 +1,19 @@
 use crate::CACHEDIR;
 use anyhow::{anyhow, Context, Result};
-use ijson::IString;
 use log::info;
-use serde::{Deserialize, Serialize};
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool, QueryBuilder};
+use serde::Deserialize;
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{Write, BufReader},
+    io::{BufReader, Write},
     path::Path,
     process::Command,
 };
 
-use super::{nixos::{self, getnixospkgs}, NixPkgList};
+use super::{
+    nixos::{self, getnixospkgs},
+    NixPkgList,
+};
 
 /// Gets a list of all packages in legacy NixOS systems with their name and version.
 /// Can be used to find what versions of system packages are currently installed.
@@ -37,8 +38,7 @@ pub async fn legacypkgs() -> Result<String> {
 
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/legacypkgs.ver", &*CACHEDIR)) {
-        if prevver.eq(nixosversion)
-            && Path::new(&format!("{}/legacypkgs.db", &*CACHEDIR)).exists()
+        if prevver.eq(nixosversion) && Path::new(&format!("{}/legacypkgs.db", &*CACHEDIR)).exists()
         {
             info!("No new version of NixOS legacy found");
             return Ok(format!("{}/legacypkgs.db", &*CACHEDIR));
@@ -55,9 +55,11 @@ pub async fn legacypkgs() -> Result<String> {
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
         let dbfile = format!("{}/legacypkgs.db", &*CACHEDIR);
-        let pkgjson: NixPkgList =
-        serde_json::from_reader(BufReader::new(resp))?;
-        nixos::createdb(&dbfile, &pkgjson);
+        let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
+        nixos::createdb(&dbfile, &pkgjson).await?;
+        // Write version downloaded to file
+        File::create(format!("{}/legacypkgs.ver", &*CACHEDIR))?
+            .write_all(nixosversion.as_bytes())?;
     } else {
         return Err(anyhow!("Failed to download legacy packages.json"));
     }
