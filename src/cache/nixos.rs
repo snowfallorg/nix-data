@@ -106,7 +106,6 @@ pub async fn nixospkgs() -> Result<String> {
         let pkgjson: NixosPkgList =
             serde_json::from_reader(BufReader::new(resp)).expect("Failed to parse packages.json");
 
-        println!("Starting to insert packages");
         let mut wtr = csv::Writer::from_writer(vec![]);
         for (pkg, data) in &pkgjson.packages {
             wtr.serialize((
