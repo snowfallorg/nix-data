@@ -40,6 +40,7 @@ pub async fn nixospkgs() -> Result<String> {
         .last()
         .context("Last element not found")?
         .to_string();
+    let latestnixosver = latestnixosver.strip_prefix("nixos-").unwrap_or(&latestnixosver);
     info!("latestnixosver: {}", latestnixosver);
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR)) {
@@ -99,6 +100,27 @@ pub async fn nixospkgs() -> Result<String> {
                 PRIMARY KEY("attribute")
             )
                 "#,
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX "attributes" ON "pkgs" ("attribute")
+            "#,
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE UNIQUE INDEX "metaattributes" ON "meta" ("attribute")
+            "#,
+        )
+        .execute(&pool)
+        .await?;
+        sqlx::query(
+            r#"
+            CREATE INDEX "pnames" ON "pkgs" ("pname")
+            "#,
         )
         .execute(&pool)
         .await?;
@@ -334,6 +356,20 @@ pub(super) async fn createdb(dbfile: &str, pkgjson: &NixPkgList) -> Result<()> {
                 PRIMARY KEY("attribute")
             )
             "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE UNIQUE INDEX "attributes" ON "pkgs" ("attribute")
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE INDEX "pnames" ON "pkgs" ("attribute")
+        "#,
     )
     .execute(&pool)
     .await?;

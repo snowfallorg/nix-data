@@ -77,3 +77,13 @@ pub async fn flakespkgs() -> Result<String> {
 pub async fn getflakepkgs(paths: &[&str]) -> Result<HashMap<String, String>> {
     getnixospkgs(paths, nixos::NixosType::Flake).await
 }
+
+pub fn uptodate() -> Result<Option<(String, String)>> {
+    let flakesver = fs::read_to_string(&format!("{}/flakespkgs.ver", &*CACHEDIR))?;
+    let nixosver = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR))?;
+    if !nixosver.eq(&flakesver) {
+        Ok(Some((flakesver, nixosver)))
+    } else {
+        Ok(None)
+    }
+}

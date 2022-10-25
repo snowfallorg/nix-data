@@ -91,3 +91,14 @@ pub fn getenvpkgs() -> Result<HashMap<String, String>> {
     }
     Ok(out)
 }
+
+pub fn uptodate() -> Result<Option<(String, String)>> {
+    let legacyver = fs::read_to_string(&format!("{}/legacypkgs.ver", &*CACHEDIR))?;
+    let nixosver = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR))?;
+    if !nixosver.eq(&legacyver) {
+        Ok(Some((legacyver, nixosver)))
+    } else {
+        Ok(None)
+    }
+}
+

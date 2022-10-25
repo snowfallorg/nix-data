@@ -18,8 +18,6 @@ pub struct NixDataConfig {
     /// Specifies which configuration should be user from the `nixosConfigurations` attribute set in the flake file.
     /// If not set, NixOS defaults to the hostname of the system.
     pub flakearg: Option<String>,
-    /// Type of package manager used by the user.
-    pub userpkgtype: Option<UserPkgType>
 }
 
 
