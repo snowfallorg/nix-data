@@ -1,4 +1,4 @@
-{ config, lib, pkgs, nix-data, ... }:
+{ config, lib, pkgs, ... }:
 with lib;
 let
   cfg = config.programs.nix-data;
@@ -7,8 +7,9 @@ in
 {
   options = {
     programs.nix-data = {
+      enable = mkEnableOption "nix-data";
       systemconfig = mkOption {
-        type = with types; str;
+        type = with types; nullOr str;
         example = literalExpression ''"/etc/nixos/configuration.nix"'';
         description = ''Where programs using nix-data looks for your system configuration.'';
       };
@@ -27,7 +28,7 @@ in
     };
   };
 
-  config = mkIf (cfg.systemconfig != null || cfg.flake != null || cfg.flakearg != null) {
-      environment.etc."nix-data/config.json".source = jsonFormat.generate "config.json" cfg;
+  config = mkIf (cfg.enable || cfg.systemconfig != null || cfg.flake != null || cfg.flakearg != null) {
+      environment.etc."nix-data/config.json".source = jsonFormat.generate "config.json" { inherit (cfg) systemconfig flake flakearg; };
     };
 }
