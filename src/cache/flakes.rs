@@ -10,7 +10,7 @@ use std::{
 };
 
 use super::{
-    nixos::{self, getnixospkgs},
+    nixos::{self, getnixospkgs, nixospkgs},
     NixPkg, NixPkgList,
 };
 
@@ -81,7 +81,9 @@ pub async fn getflakepkgs(paths: &[&str]) -> Result<HashMap<String, String>> {
 pub fn uptodate() -> Result<Option<(String, String)>> {
     let flakesver = fs::read_to_string(&format!("{}/flakespkgs.ver", &*CACHEDIR))?;
     let nixosver = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR))?;
-    if !nixosver.eq(&flakesver) {
+    let flakeslast = flakesver.split('.').collect::<Vec<_>>().last().context("Invalid version")?.to_string();
+    let nixoslast = nixosver.split('.').collect::<Vec<_>>().last().context("Invalid version")?.to_string();
+    if !nixoslast.starts_with(&flakeslast) {
         Ok(Some((flakesver, nixosver)))
     } else {
         Ok(None)
