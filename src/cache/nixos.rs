@@ -310,12 +310,13 @@ pub(super) async fn getnixospkgs(
                 &fs::read_to_string(path)?,
                 "environment.systemPackages",
             ) {
-                let filepkgset = filepkgs.into_iter().collect::<HashSet<_>>();
+                let filepkgset = filepkgs.into_iter().map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string()).collect::<HashSet<_>>();
                 allpkgs = allpkgs.union(&filepkgset).map(|x| x.to_string()).collect();
             }
         }
         allpkgs
     };
+    debug!("getnixospkgs: {:?}", pkgs);
     let pkgsdb = match nixos {
         NixosType::Flake => flakes::flakespkgs().await?,
         NixosType::Legacy => channel::legacypkgs().await?,

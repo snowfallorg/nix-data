@@ -7,12 +7,14 @@ use log::{debug, info};
 use serde::Deserialize;
 use sqlx::{Row, SqlitePool};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::{BufReader, Write},
     path::Path,
     process::Command,
 };
+
+use super::{nixos::nixospkgs, flakes::getflakepkgs};
 
 #[derive(Debug, Deserialize)]
 struct ProfilePkgsRoot {
@@ -174,4 +176,56 @@ pub async fn nixpkgslatest() -> Result<String> {
     }
 
     Ok(format!("{}/nixpkgs.db", &*CACHEDIR))
+}
+
+pub async fn unavailablepkgs() -> Result<HashMap<String, String>> {
+    let nixpath = Command::new("nix")
+        .arg("eval")
+        .arg("nixpkgs#path")
+        .output()?.stdout;
+    let nixpath = String::from_utf8(nixpath)?;
+    let nixpath = nixpath.trim();
+    
+    let aliases = Command::new("nix-instantiate")
+        .arg("--eval")
+        .arg("-E")
+        .arg(&format!("with import {} {{}}; builtins.attrNames ((self: super: lib.optionalAttrs config.allowAliases (import {}/pkgs/top-level/aliases.nix lib self super)) {{}} {{}})", nixpath, nixpath))
+        .arg("--json")
+        .output()?;
+    let aliasstr = String::from_utf8(aliases.stdout)?;
+    let aliasesout: HashSet<String> = serde_json::from_str(&aliasstr)?;
+
+    let flakespkgs = getprofilepkgs()?;
+    let mut unavailable = HashMap::new();
+    for pkg in flakespkgs.keys() {
+        if aliasesout.contains(pkg) && Command::new("nix-instantiate")
+                .arg("--eval")
+                .arg("-E")
+                .arg(&format!("with import {} {{}}; builtins.tryEval ((self: super: lib.optionalAttrs config.allowAliases (import {}/pkgs/top-level/aliases.nix lib self super)) {{}} {{}}).{}", nixpath, nixpath, pkg))
+                .output()?.status.success() {
+            let out = Command::new("nix-instantiate")
+                .arg("--eval")
+                .arg("-E")
+                .arg(&format!("with import {} {{}}; ((self: super: lib.optionalAttrs config.allowAliases (import {}/pkgs/top-level/aliases.nix lib self super)) {{}} {{}}).{}", nixpath, nixpath, pkg))
+                .output()?;
+            let err = String::from_utf8(out.stderr)?;
+            let err = err.strip_prefix("error: ").unwrap_or(&err).trim();
+            unavailable.insert(pkg.to_string(), err.to_string());
+        }
+    }
+
+    let nixospkgs = nixospkgs().await?;
+    let pool = SqlitePool::connect(&format!("sqlite://{}", nixospkgs)).await?;
+
+    for pkg in flakespkgs.keys() {
+        let (x, broken, insecure): (String, u8, u8) = sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1").bind(&pkg).fetch_one(&pool).await?;
+        if &x != pkg {
+            unavailable.insert(pkg.to_string(), String::from("Package not found in newer version of nixpkgs"));
+        } else if broken == 1 {
+            unavailable.insert(pkg.to_string(), String::from("Package is marked as broken"));
+        } else if insecure == 1 {
+            unavailable.insert(pkg.to_string(), String::from("Package is marked as insecure"));
+        }
+    }
+    Ok(unavailable)
 }
