@@ -15,16 +15,11 @@ use std::{
 
 use super::{channel, flakes};
 
-/// Downloads the latest `packages.json` for the system from the NixOS cache and returns the path to the file.
+/// Downloads the latest `packages.json` for the system from the NixOS cache and returns the path to an SQLite database `nixospkgs.db` which contains package data.
 /// Will only work on NixOS systems.
 pub async fn nixospkgs() -> Result<String> {
     let versionout = Command::new("nixos-version").output()?;
-    let numver = &String::from_utf8(versionout.stdout)?[0..5];
-    let version = if numver == "22.11" {
-        "unstable"
-    } else {
-        numver
-    };
+    let mut version = &String::from_utf8(versionout.stdout)?[0..5];
 
     // If cache directory doesn't exist, create it
     if !std::path::Path::new(&*CACHEDIR).exists() {
@@ -32,15 +27,34 @@ pub async fn nixospkgs() -> Result<String> {
     }
 
     let verurl = format!("https://channels.nixos.org/nixos-{}", version);
+    debug!("Checking NixOS version");
     let resp = reqwest::blocking::get(&verurl)?;
-    let latestnixosver = resp
-        .url()
-        .path_segments()
-        .context("No path segments found")?
-        .last()
-        .context("Last element not found")?
-        .to_string();
-    let latestnixosver = latestnixosver.strip_prefix("nixos-").unwrap_or(&latestnixosver);
+    let latestnixosver = if resp.status().is_success() {
+        resp.url()
+            .path_segments()
+            .context("No path segments found")?
+            .last()
+            .context("Last element not found")?
+            .to_string()
+    } else {
+        let resp = reqwest::blocking::get("https://channels.nixos.org/nixos-unstable")?;
+        if resp.status().is_success() {
+            version = "unstable";
+            resp.url()
+                .path_segments()
+                .context("No path segments found")?
+                .last()
+                .context("Last element not found")?
+                .to_string()
+        } else {
+            return Err(anyhow!("Could not find latest NixOS version"));
+        }
+    };
+    debug!("Latest NixOS version: {}", latestnixosver);
+
+    let latestnixosver = latestnixosver
+        .strip_prefix("nixos-")
+        .unwrap_or(&latestnixosver);
     info!("latestnixosver: {}", latestnixosver);
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR)) {
@@ -57,15 +71,18 @@ pub async fn nixospkgs() -> Result<String> {
     );
 
     // Download file with reqwest blocking
+    debug!("Downloading packages.json.br");
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
         // resp is pkgsjson
+        debug!("Successfully downloaded packages.json.br");
         let db = format!("sqlite://{}/nixospkgs.db", &*CACHEDIR);
 
         if Path::new(&format!("{}/nixospkgs.db", &*CACHEDIR)).exists() {
             fs::remove_file(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
         }
+        debug!("Creating SQLite database");
         Sqlite::create_database(&db).await?;
         let pool = SqlitePool::connect(&db).await?;
         sqlx::query(
@@ -125,9 +142,11 @@ pub async fn nixospkgs() -> Result<String> {
         .execute(&pool)
         .await?;
 
+        debug!("Reading packages.json.br");
         let pkgjson: NixosPkgList =
             serde_json::from_reader(BufReader::new(resp)).expect("Failed to parse packages.json");
 
+        debug!("Creating csv data");
         let mut wtr = csv::Writer::from_writer(vec![]);
         for (pkg, data) in &pkgjson.packages {
             wtr.serialize((
@@ -138,6 +157,7 @@ pub async fn nixospkgs() -> Result<String> {
             ))?;
         }
         let data = String::from_utf8(wtr.into_inner()?)?;
+        debug!("Inserting data into database");
         let mut cmd = Command::new("sqlite3")
             .arg("-csv")
             .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
@@ -218,6 +238,7 @@ pub async fn nixospkgs() -> Result<String> {
             ))?;
         }
         let metadata = String::from_utf8(metawtr.into_inner()?)?;
+        debug!("Inserting metadata into database");
         let mut metacmd = Command::new("sqlite3")
             .arg("-csv")
             .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
@@ -227,6 +248,7 @@ pub async fn nixospkgs() -> Result<String> {
         let metacmd_stdin = metacmd.stdin.as_mut().unwrap();
         metacmd_stdin.write_all(metadata.as_bytes())?;
         let _status = metacmd.wait()?;
+        debug!("Finished creating database");
         // Write version downloaded to file
         File::create(format!("{}/nixospkgs.ver", &*CACHEDIR))?
             .write_all(latestnixosver.as_bytes())?;
@@ -241,12 +263,7 @@ pub async fn nixospkgs() -> Result<String> {
 /// Will only work on NixOS systems.
 pub fn nixosoptions() -> Result<String> {
     let versionout = Command::new("nixos-version").output()?;
-    let numver = &String::from_utf8(versionout.stdout)?[0..5];
-    let version = if numver == "22.11" {
-        "unstable"
-    } else {
-        numver
-    };
+    let mut version = &String::from_utf8(versionout.stdout)?[0..5];
 
     // If cache directory doesn't exist, create it
     if !std::path::Path::new(&*CACHEDIR).exists() {
@@ -254,24 +271,30 @@ pub fn nixosoptions() -> Result<String> {
     }
 
     let verurl = format!("https://channels.nixos.org/nixos-{}", version);
+    debug!("Checking NixOS version");
     let resp = reqwest::blocking::get(&verurl)?;
-    let latestnixosver = resp
-        .url()
-        .path_segments()
-        .context("No path segments found")?
-        .last()
-        .context("Last element not found")?
-        .to_string();
-    info!("latestnixosver: {}", latestnixosver);
-    // Check if latest version is already downloaded
-    if let Ok(prevver) = fs::read_to_string(&format!("{}/nixosoptions.ver", &*CACHEDIR)) {
-        if prevver == latestnixosver
-            && Path::new(&format!("{}/nixosoptions.json", &*CACHEDIR)).exists()
-        {
-            debug!("No new version of NixOS found");
-            return Ok(format!("{}/nixosoptions.json", &*CACHEDIR));
+    let latestnixosver = if resp.status().is_success() {
+        resp.url()
+            .path_segments()
+            .context("No path segments found")?
+            .last()
+            .context("Last element not found")?
+            .to_string()
+    } else {
+        let resp = reqwest::blocking::get("https://channels.nixos.org/nixos-unstable")?;
+        if resp.status().is_success() {
+            version = "unstable";
+            resp.url()
+                .path_segments()
+                .context("No path segments found")?
+                .last()
+                .context("Last element not found")?
+                .to_string()
+        } else {
+            return Err(anyhow!("Could not find latest NixOS version"));
         }
-    }
+    };
+    debug!("Latest NixOS version: {}", latestnixosver);
 
     let url = format!(
         "https://channels.nixos.org/nixos-{}/options.json.br",
@@ -310,7 +333,10 @@ pub(super) async fn getnixospkgs(
                 &fs::read_to_string(path)?,
                 "environment.systemPackages",
             ) {
-                let filepkgset = filepkgs.into_iter().map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string()).collect::<HashSet<_>>();
+                let filepkgset = filepkgs
+                    .into_iter()
+                    .map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string())
+                    .collect::<HashSet<_>>();
                 allpkgs = allpkgs.union(&filepkgset).map(|x| x.to_string()).collect();
             }
         }

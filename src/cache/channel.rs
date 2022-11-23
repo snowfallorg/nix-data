@@ -26,7 +26,7 @@ pub async fn legacypkgs() -> Result<String> {
     let nixosversion = version
         .get("nixosVersion")
         .context("No NixOS version found")?;
-    let relver = if nixosversion[0..5].eq("22.11") {
+    let relver = if nixosversion[5..8].eq("pre") {
         "unstable"
     } else {
         &nixosversion[0..5]
