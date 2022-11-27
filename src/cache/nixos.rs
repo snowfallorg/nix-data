@@ -26,26 +26,16 @@ pub async fn nixospkgs() -> Result<String> {
         std::fs::create_dir_all(&*CACHEDIR)?;
     }
 
-    let verurl = format!("https://channels.nixos.org/nixos-{}", version);
+    let verurl = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/{}/nixospkgs.ver", version);
     debug!("Checking NixOS version");
     let resp = reqwest::blocking::get(&verurl)?;
     let latestnixosver = if resp.status().is_success() {
-        resp.url()
-            .path_segments()
-            .context("No path segments found")?
-            .last()
-            .context("Last element not found")?
-            .to_string()
+        resp.text()?
     } else {
-        let resp = reqwest::blocking::get("https://channels.nixos.org/nixos-unstable")?;
+        let resp = reqwest::blocking::get("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/unstable/nixospkgs.ver")?;
         if resp.status().is_success() {
             version = "unstable";
-            resp.url()
-                .path_segments()
-                .context("No path segments found")?
-                .last()
-                .context("Last element not found")?
-                .to_string()
+            resp.text()?
         } else {
             return Err(anyhow!("Could not find latest NixOS version"));
         }
