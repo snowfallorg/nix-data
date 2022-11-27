@@ -26,13 +26,13 @@ pub async fn nixospkgs() -> Result<String> {
         std::fs::create_dir_all(&*CACHEDIR)?;
     }
 
-    let verurl = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/{}/nixospkgs.ver", version);
+    let verurl = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-{}/nixpkgs.ver", version);
     debug!("Checking NixOS version");
     let resp = reqwest::blocking::get(&verurl)?;
     let latestnixosver = if resp.status().is_success() {
         resp.text()?
     } else {
-        let resp = reqwest::blocking::get("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/unstable/nixospkgs.ver")?;
+        let resp = reqwest::blocking::get("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-unstable/nixpkgs.ver")?;
         if resp.status().is_success() {
             version = "unstable";
             resp.text()?
@@ -55,7 +55,7 @@ pub async fn nixospkgs() -> Result<String> {
         }
     }
 
-    let url = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/{}/nixospkgs.db.br", version);
+    let url = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-{}/nixpkgs.db.br", version);
     debug!("Downloading nix-data database");
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;

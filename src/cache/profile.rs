@@ -9,12 +9,12 @@ use sqlx::{Row, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{BufReader, Write},
+    io::{BufReader, Write, Read},
     path::Path,
     process::Command,
 };
 
-use super::{nixos::nixospkgs, flakes::getflakepkgs};
+use super::{flakes::getflakepkgs, nixos::nixospkgs};
 
 #[derive(Debug, Deserialize)]
 struct ProfilePkgsRoot {
@@ -131,20 +131,22 @@ pub async fn nixpkgslatest() -> Result<String> {
     }
 
     let verurl = if let Some(v) = &nixpkgsver {
-        format!("https://channels.nixos.org/{}", v)
+        format!(
+            "https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/{}/nixpkgs.ver",
+            v
+        )
     } else {
-        String::from("https://channels.nixos.org/nixpkgs-unstable")
+        String::from("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixpkgs-unstable/nixpkgs.ver")
     };
-
+    debug!("Checking nixpkgs version");
     let resp = reqwest::blocking::get(&verurl)?;
-    let latestnixpkgsver = resp
-        .url()
-        .path_segments()
-        .context("No path segments found")?
-        .last()
-        .context("Last element not found")?
-        .to_string();
-    info!("latestnixpkgsver: {}", latestnixpkgsver);
+    let latestnixpkgsver = if resp.status().is_success() {
+        resp.text()?
+    } else {
+        return Err(anyhow!("Could not find latest nixpkgs version"));
+    };
+    debug!("Latest nixpkgs version: {}", latestnixpkgsver);
+
     // Check if latest version is already downloaded
     if let Ok(prevver) = fs::read_to_string(&format!("{}/nixpkgs.ver", &*CACHEDIR)) {
         if prevver == latestnixpkgsver && Path::new(&format!("{}/nixpkgs.db", &*CACHEDIR)).exists()
@@ -155,26 +157,52 @@ pub async fn nixpkgslatest() -> Result<String> {
     }
 
     let url = if let Some(v) = &nixpkgsver {
-        format!("https://channels.nixos.org/{}/packages.json.br", v)
+        format!(
+            "https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/{}/nixpkgs_versions.db.br",
+            v
+        )
     } else {
-        String::from("https://channels.nixos.org/nixpkgs-unstable/packages.json.br")
+        String::from("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixpkgs-unstable/nixpkgs_versions.db.br")
     };
-    info!("Downloading {}", url);
-
-    // Download file with reqwest blocking
+    debug!("Downloading nix-data database");
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;
     if resp.status().is_success() {
-        let dbfile = format!("{}/nixpkgs.db", &*CACHEDIR);
-        let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
-        nixos::createdb(&dbfile, &pkgjson).await?;
+        debug!("Writing nix-data database");
+        let mut out = File::create(&format!("{}/nixpkgs.db", &*CACHEDIR))?;
+        {
+            let bytes = resp.bytes()?;
+            let mut reader = brotli::Decompressor::new(
+                bytes.as_ref(),
+                4096, // buffer size
+            );
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf[..]) {
+                    Err(e) => {
+                        if let std::io::ErrorKind::Interrupted = e.kind() {
+                            continue;
+                        }
+                        panic!("{}", e);
+                    }
+                    Ok(size) => {
+                        if size == 0 {
+                            break;
+                        }
+                        if let Err(e) = out.write_all(&buf[..size]) {
+                            panic!("{}", e)
+                        }
+                    }
+                }
+            }
+        }
+        debug!("Writing nix-data version");
         // Write version downloaded to file
         File::create(format!("{}/nixpkgs.ver", &*CACHEDIR))?
             .write_all(latestnixpkgsver.as_bytes())?;
     } else {
-        return Err(anyhow!("Failed to download nix profile packages.json"));
+        return Err(anyhow!("Failed to download latest nixpkgs.db.br"));
     }
-
     Ok(format!("{}/nixpkgs.db", &*CACHEDIR))
 }
 
@@ -182,10 +210,11 @@ pub async fn unavailablepkgs() -> Result<HashMap<String, String>> {
     let nixpath = Command::new("nix")
         .arg("eval")
         .arg("nixpkgs#path")
-        .output()?.stdout;
+        .output()?
+        .stdout;
     let nixpath = String::from_utf8(nixpath)?;
     let nixpath = nixpath.trim();
-    
+
     let aliases = Command::new("nix-instantiate")
         .arg("--eval")
         .arg("-E")
@@ -218,13 +247,23 @@ pub async fn unavailablepkgs() -> Result<HashMap<String, String>> {
     let pool = SqlitePool::connect(&format!("sqlite://{}", nixospkgs)).await?;
 
     for pkg in flakespkgs.keys() {
-        let (x, broken, insecure): (String, u8, u8) = sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1").bind(&pkg).fetch_one(&pool).await?;
+        let (x, broken, insecure): (String, u8, u8) =
+            sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1")
+                .bind(&pkg)
+                .fetch_one(&pool)
+                .await?;
         if &x != pkg {
-            unavailable.insert(pkg.to_string(), String::from("Package not found in newer version of nixpkgs"));
+            unavailable.insert(
+                pkg.to_string(),
+                String::from("Package not found in newer version of nixpkgs"),
+            );
         } else if broken == 1 {
             unavailable.insert(pkg.to_string(), String::from("Package is marked as broken"));
         } else if insecure == 1 {
-            unavailable.insert(pkg.to_string(), String::from("Package is marked as insecure"));
+            unavailable.insert(
+                pkg.to_string(),
+                String::from("Package is marked as insecure"),
+            );
         }
     }
     Ok(unavailable)
