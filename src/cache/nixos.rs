@@ -1,5 +1,5 @@
 use crate::{
-    cache::{NixPkgList, NixosPkgList, StrOrVec},
+    cache::NixPkgList,
     CACHEDIR,
 };
 use anyhow::{anyhow, Context, Result};
@@ -8,7 +8,7 @@ use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{BufReader, Write},
+    io::{Write},
     path::Path,
     process::{Command, Stdio},
 };
@@ -65,197 +65,21 @@ pub async fn nixospkgs() -> Result<String> {
         }
     }
 
-    let url = format!(
-        "https://channels.nixos.org/nixos-{}/packages.json.br",
-        version
-    );
-
-    // Download file with reqwest blocking
-    debug!("Downloading packages.json.br");
+    let url = format!("https://github.com/snowflakelinux/nix-data-db/raw/main/{}/nixospkgs.db.br", version);
+    debug!("Downloading nix-data database");
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let resp = client.get(url).send()?;
+    let mut resp = client.get(url).send()?;
     if resp.status().is_success() {
-        // resp is pkgsjson
-        debug!("Successfully downloaded packages.json.br");
-        let db = format!("sqlite://{}/nixospkgs.db", &*CACHEDIR);
-
-        if Path::new(&format!("{}/nixospkgs.db", &*CACHEDIR)).exists() {
-            fs::remove_file(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
-        }
-        debug!("Creating SQLite database");
-        Sqlite::create_database(&db).await?;
-        let pool = SqlitePool::connect(&db).await?;
-        sqlx::query(
-            r#"
-                CREATE TABLE "pkgs" (
-                    "attribute"	TEXT NOT NULL UNIQUE,
-                    "system"	TEXT,
-                    "pname"	TEXT,
-                    "version"	TEXT,
-                    PRIMARY KEY("attribute")
-                )
-                "#,
-        )
-        .execute(&pool)
-        .await?;
-        sqlx::query(
-            r#"
-            CREATE TABLE "meta" (
-                "attribute"	TEXT NOT NULL UNIQUE,
-                "broken"	INTEGER,
-                "insecure"	INTEGER,
-                "unsupported"	INTEGER,
-                "unfree"	INTEGER,
-                "description"	TEXT,
-                "longdescription"	TEXT,
-                "homepage"	TEXT,
-                "maintainers"	JSON,
-                "position"	TEXT,
-                "license"	JSON,
-                "platforms"	JSON,
-                FOREIGN KEY("attribute") REFERENCES "pkgs"("attribute"),
-                PRIMARY KEY("attribute")
-            )
-                "#,
-        )
-        .execute(&pool)
-        .await?;
-        sqlx::query(
-            r#"
-            CREATE UNIQUE INDEX "attributes" ON "pkgs" ("attribute")
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-        sqlx::query(
-            r#"
-            CREATE UNIQUE INDEX "metaattributes" ON "meta" ("attribute")
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-        sqlx::query(
-            r#"
-            CREATE INDEX "pnames" ON "pkgs" ("pname")
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-
-        debug!("Reading packages.json.br");
-        let pkgjson: NixosPkgList =
-            serde_json::from_reader(BufReader::new(resp)).expect("Failed to parse packages.json");
-
-        debug!("Creating csv data");
-        let mut wtr = csv::Writer::from_writer(vec![]);
-        for (pkg, data) in &pkgjson.packages {
-            wtr.serialize((
-                pkg,
-                data.system.to_string(),
-                data.pname.to_string(),
-                data.version.to_string(),
-            ))?;
-        }
-        let data = String::from_utf8(wtr.into_inner()?)?;
-        debug!("Inserting data into database");
-        let mut cmd = Command::new("sqlite3")
-            .arg("-csv")
-            .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
-            .arg(".import '|cat -' pkgs")
-            .stdin(Stdio::piped())
-            .spawn()?;
-        let cmd_stdin = cmd.stdin.as_mut().unwrap();
-        cmd_stdin.write_all(data.as_bytes())?;
-        let _status = cmd.wait()?;
-        let mut metawtr = csv::Writer::from_writer(vec![]);
-        for (pkg, data) in &pkgjson.packages {
-            metawtr.serialize((
-                pkg,
-                if let Some(x) = data.meta.broken {
-                    if x {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                },
-                if let Some(x) = data.meta.insecure {
-                    if x {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                },
-                if let Some(x) = data.meta.unsupported {
-                    if x {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                },
-                if let Some(x) = data.meta.unfree {
-                    if x {
-                        1
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                },
-                data.meta.description.as_ref().map(|x| x.to_string()),
-                data.meta.longdescription.as_ref().map(|x| x.to_string()),
-                data.meta.homepage.as_ref().and_then(|x| match x {
-                    StrOrVec::List(x) => x.first().map(|x| x.to_string()),
-                    StrOrVec::Single(x) => Some(x.to_string()),
-                }),
-                data.meta
-                    .maintainers
-                    .as_ref()
-                    .and_then(|x| match serde_json::to_string(x) {
-                        Ok(x) => Some(x),
-                        Err(_) => None,
-                    }),
-                data.meta.position.as_ref().map(|x| x.to_string()),
-                data.meta
-                    .license
-                    .as_ref()
-                    .and_then(|x| match serde_json::to_string(x) {
-                        Ok(x) => Some(x),
-                        Err(_) => None,
-                    }),
-                data.meta
-                    .platforms
-                    .as_ref()
-                    .and_then(|x| match serde_json::to_string(x) {
-                        Ok(x) => Some(x),
-                        Err(_) => None,
-                    }),
-            ))?;
-        }
-        let metadata = String::from_utf8(metawtr.into_inner()?)?;
-        debug!("Inserting metadata into database");
-        let mut metacmd = Command::new("sqlite3")
-            .arg("-csv")
-            .arg(&format!("{}/nixospkgs.db", &*CACHEDIR))
-            .arg(".import '|cat -' meta")
-            .stdin(Stdio::piped())
-            .spawn()?;
-        let metacmd_stdin = metacmd.stdin.as_mut().unwrap();
-        metacmd_stdin.write_all(metadata.as_bytes())?;
-        let _status = metacmd.wait()?;
-        debug!("Finished creating database");
+        debug!("Writing nix-data database");
+        let mut out = File::create(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
+        resp.copy_to(&mut out)?;
+        debug!("Writing nix-data version");
         // Write version downloaded to file
         File::create(format!("{}/nixospkgs.ver", &*CACHEDIR))?
             .write_all(latestnixosver.as_bytes())?;
     } else {
-        return Err(anyhow!("Failed to download latest packages.json"));
+        return Err(anyhow!("Failed to download latest nixospkgs.db.br"));
     }
-
     Ok(format!("{}/nixospkgs.db", &*CACHEDIR))
 }
 
