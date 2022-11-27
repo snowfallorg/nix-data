@@ -18,7 +18,7 @@ keywords = ["nix", "nixos", "nix-editor", "snowflakeos"]
 reqwest = { version = "0.11", features = ["blocking", "brotli"] }
 anyhow = "1.0"
 lazy_static = "1.4"
-
+brotli = "3.3"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 ijson = "0.1"

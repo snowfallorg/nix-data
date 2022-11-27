@@ -8,7 +8,7 @@ use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{Write},
+    io::{Write, Read},
     path::Path,
     process::{Command, Stdio},
 };
@@ -65,14 +65,39 @@ pub async fn nixospkgs() -> Result<String> {
         }
     }
 
-    let url = format!("https://github.com/snowflakelinux/nix-data-db/raw/main/{}/nixospkgs.db.br", version);
+    let url = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/{}/nixospkgs.db.br", version);
     debug!("Downloading nix-data database");
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let mut resp = client.get(url).send()?;
+    let resp = client.get(url).send()?;
     if resp.status().is_success() {
         debug!("Writing nix-data database");
         let mut out = File::create(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
-        resp.copy_to(&mut out)?;
+        {
+            let bytes = resp.bytes()?;
+            let mut reader = brotli::Decompressor::new(
+                bytes.as_ref(),
+                4096, // buffer size
+            );
+            let mut buf = [0u8; 4096];
+            loop {
+                match reader.read(&mut buf[..]) {
+                    Err(e) => {
+                        if let std::io::ErrorKind::Interrupted = e.kind() {
+                            continue;
+                        }
+                        panic!("{}", e);
+                    }
+                    Ok(size) => {
+                        if size == 0 {
+                            break;
+                        }
+                        if let Err(e) = out.write_all(&buf[..size]) {
+                            panic!("{}", e)
+                        }
+                    }
+                }
+            }
+        }
         debug!("Writing nix-data version");
         // Write version downloaded to file
         File::create(format!("{}/nixospkgs.ver", &*CACHEDIR))?
