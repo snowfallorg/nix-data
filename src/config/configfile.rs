@@ -18,6 +18,9 @@ pub struct NixDataConfig {
     /// Specifies which configuration should be user from the `nixosConfigurations` attribute set in the flake file.
     /// If not set, NixOS defaults to the hostname of the system.
     pub flakearg: Option<String>,
+    /// Specifies how many NixOS generations to keep. If set to 0, all generations will be kept.
+    /// If not set, the default is 5.
+    pub generations: Option<u32>,
 }
 
 
