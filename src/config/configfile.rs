@@ -9,7 +9,7 @@ use std::{
 };
 
 /// Struct containing locations of system configuration files and some user configuration.
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug, Default)]
 pub struct NixDataConfig {
     /// Path to the NixOS configuration file. Typically `/etc/nixos/configuration.nix`.
     pub systemconfig: Option<String>,
