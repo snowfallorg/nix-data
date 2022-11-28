@@ -25,10 +25,16 @@ in
         example = literalExpression ''user'';
         description = lib.mdDoc ''The flake argument to use when rebuilding the system. `nixos-rebuild switch --flake $\{programs.nix-data.flake}#$\{programs.nix-data.flakearg}`'';
       };
+      generations = mkOption {
+        type = with types; nullOr int;
+        default = null;
+        example = literalExpression ''5'';
+        description = lib.mdDoc ''The number of generations to keep when rebuilding the system. Leaving as null or setting to 0 will keep all generations.'';
+      };
     };
   };
 
-  config = mkIf (cfg.enable || cfg.systemconfig != null || cfg.flake != null || cfg.flakearg != null) {
-      environment.etc."nix-data/config.json".source = jsonFormat.generate "config.json" { inherit (cfg) systemconfig flake flakearg; };
+  config = mkIf (cfg.enable || cfg.systemconfig != null || cfg.flake != null || cfg.flakearg != null || cfg.generations != null) {
+      environment.etc."nix-data/config.json".source = jsonFormat.generate "config.json" { inherit (cfg) systemconfig flake flakearg generations; };
     };
 }
