@@ -1,14 +1,11 @@
-use crate::{
-    cache::NixPkgList,
-    CACHEDIR,
-};
+use crate::{cache::NixPkgList, CACHEDIR};
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
 use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{Write, Read},
+    io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
 };
@@ -26,9 +23,25 @@ pub async fn nixospkgs() -> Result<String> {
         std::fs::create_dir_all(&*CACHEDIR)?;
     }
 
-    let verurl = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-{}/nixpkgs.ver", version);
+    let verurl = format!(
+        "https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-{}/nixpkgs.ver",
+        version
+    );
     debug!("Checking NixOS version");
-    let resp = reqwest::blocking::get(&verurl)?;
+    let resp = reqwest::blocking::get(&verurl);
+    let resp = if let Ok(r) = resp {
+        r
+    } else {
+        // Internet connection failed
+        // Check if we can use the old database
+        let dbpath = format!("{}/nixospkgs.db", &*CACHEDIR);
+        if Path::new(&dbpath).exists() {
+            info!("Using old database");
+            return Ok(dbpath);
+        } else {
+            return Err(anyhow!("Could not find latest NixOS version"));
+        }
+    };
     let latestnixosver = if resp.status().is_success() {
         resp.text()?
     } else {
@@ -55,7 +68,10 @@ pub async fn nixospkgs() -> Result<String> {
         }
     }
 
-    let url = format!("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-{}/nixpkgs.db.br", version);
+    let url = format!(
+        "https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-{}/nixpkgs.db.br",
+        version
+    );
     debug!("Downloading nix-data database");
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
     let resp = client.get(url).send()?;

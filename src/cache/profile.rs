@@ -139,7 +139,20 @@ pub async fn nixpkgslatest() -> Result<String> {
         String::from("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixpkgs-unstable/nixpkgs.ver")
     };
     debug!("Checking nixpkgs version");
-    let resp = reqwest::blocking::get(&verurl)?;
+    let resp = reqwest::blocking::get(&verurl);
+    let resp = if let Ok(r) = resp {
+        r
+    } else {
+        // Internet connection failed
+        // Check if we can use the old database
+        let dbpath = format!("{}/nixpkgs.db", &*CACHEDIR);
+        if Path::new(&dbpath).exists() {
+            info!("Using old database");
+            return Ok(dbpath);
+        } else {
+            return Err(anyhow!("Could not find latest nixpkgs version"));
+        }
+    };
     let latestnixpkgsver = if resp.status().is_success() {
         resp.text()?
     } else {

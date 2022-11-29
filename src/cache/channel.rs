@@ -53,7 +53,20 @@ pub async fn legacypkgs() -> Result<String> {
 
     // Download file with reqwest blocking
     let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let resp = client.get(url).send()?;
+    let resp = client.get(url).send();
+    let resp = if let Ok(r) = resp {
+        r
+    } else {
+        // Internet connection failed
+        // Check if we can use the old database
+        let dbpath = format!("{}/legacypkgs.db", &*CACHEDIR);
+        if Path::new(&dbpath).exists() {
+            info!("Using old database");
+            return Ok(dbpath);
+        } else {
+            return Err(anyhow!("Failed to download legacy packages.json"));
+        }
+    };
     if resp.status().is_success() {
         let dbfile = format!("{}/legacypkgs.db", &*CACHEDIR);
         let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
