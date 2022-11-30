@@ -11,6 +11,16 @@ pub fn refreshicons() -> Result<()> {
     let iconpath = &format!("{}/.local/share/icons/nixrefresh.png", &*HOME);
     fs::create_dir_all(desktoppath)?;
     fs::create_dir_all(&format!("{}/.local/share/icons", &*HOME))?;
+
+    // Clean up old links
+    for filename in (fs::read_dir(desktoppath)?).flatten() {
+        if let Ok(link) = filename.path().read_link() {
+            if link.starts_with(&format!("{}/.nix-profile/share/applications", &*HOME)) {
+                fs::remove_file(filename.path())?;
+            }
+        }
+    }
+
     for filename in
         (fs::read_dir(&format!("{}/.nix-profile/share/applications", &*HOME))?).flatten()
     {
