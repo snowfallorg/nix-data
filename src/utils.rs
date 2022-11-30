@@ -2,7 +2,7 @@ use crate::HOME;
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
-    path::Path,
+    path::Path, io::{Read, Write}, os::unix::prelude::PermissionsExt,
 };
 
 /// Refreshes desktop icons for applications installed with Nix
@@ -12,12 +12,10 @@ pub fn refreshicons() -> Result<()> {
     fs::create_dir_all(desktoppath)?;
     fs::create_dir_all(&format!("{}/.local/share/icons", &*HOME))?;
 
-    // Clean up old links
+    // Clean up old files
     for filename in (fs::read_dir(desktoppath)?).flatten() {
-        if let Ok(link) = filename.path().read_link() {
-            if link.starts_with(&format!("{}/.nix-profile/share/applications", &*HOME)) {
-                fs::remove_file(filename.path())?;
-            }
+        if filename.file_type()?.is_file() && fs::read_to_string(filename.path())?.lines().next() == Some("# Nix Desktop Entry") {
+            fs::remove_file(filename.path())?;
         }
     }
 
@@ -33,7 +31,18 @@ pub fn refreshicons() -> Result<()> {
         if Path::new(&localpath).exists() {
             fs::remove_file(&localpath)?;
         }
-        std::os::unix::fs::symlink(filepath, localpath)?;
+        fs::copy(&filepath, &localpath)?;
+        // Write "# Nix Desktop Entry" to the top of the file
+        let mut file = File::open(&localpath)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        contents = format!("# Nix Desktop Entry\n{}", contents);
+        fs::remove_file(&localpath)?;
+        let mut file = File::create(&localpath)?;
+        file.write_all(contents.as_bytes())?;
+        let mut perms = fs::metadata(&localpath)?.permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&localpath, perms)?;
     }
 
     if Path::new(iconpath).exists() {
