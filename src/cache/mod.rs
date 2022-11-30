@@ -11,6 +11,8 @@ pub mod flakes;
 pub mod nixos;
 /// Cache and determine packages installed with `nix profile`
 pub mod profile;
+/// Nixpkgs cache on non-NixOS
+pub mod nonnixos;
 
 #[derive(Debug, Deserialize)]
 struct NixPkgList {
