@@ -41,6 +41,9 @@ pub struct ProfilePkg {
 /// Returns a list of all packages installed with `nix profile` with their name.
 /// Does not include individual version.
 pub fn getprofilepkgs() -> Result<HashMap<String, ProfilePkg>> {
+    if !Path::new(&format!("{}/.nix-profile/manifest.json", std::env::var("HOME")?)).exists() {
+        return Ok(HashMap::new());
+    }
     let profileroot: ProfilePkgsRoot = serde_json::from_reader(File::open(&format!(
         "{}/.nix-profile/manifest.json",
         std::env::var("HOME")?
@@ -78,6 +81,9 @@ pub fn getprofilepkgs() -> Result<HashMap<String, ProfilePkg>> {
 /// Returns a list of all packages installed with `nix profile` with their name and version.
 /// Takes significantly longer than [getprofilepkgs()].
 pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
+    if !Path::new(&format!("{}/.nix-profile/manifest.json", std::env::var("HOME")?)).exists() {
+        return Ok(HashMap::new());
+    }
     let profilepkgs = getprofilepkgs()?;
     let latestpkgs = if Path::new(&format!("{}/nixpkgs.db", &*CACHEDIR)).exists() {
         format!("{}/nixpkgs.db", &*CACHEDIR)
