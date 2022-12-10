@@ -51,9 +51,9 @@ pub async fn legacypkgs() -> Result<String> {
         relver, nixosversion
     );
 
-    // Download file with reqwest blocking
-    let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let resp = client.get(url).send();
+    // Download file with reqwest
+    let client = reqwest::Client::builder().brotli(true).build()?;
+    let resp = client.get(url).send().await;
     let resp = if let Ok(r) = resp {
         r
     } else {
@@ -69,7 +69,7 @@ pub async fn legacypkgs() -> Result<String> {
     };
     if resp.status().is_success() {
         let dbfile = format!("{}/legacypkgs.db", &*CACHEDIR);
-        let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp))?;
+        let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp.text().await?.as_bytes()))?;
         nixos::createdb(&dbfile, &pkgjson).await?;
         // Write version downloaded to file
         File::create(format!("{}/legacypkgs.ver", &*CACHEDIR))?

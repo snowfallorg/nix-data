@@ -145,7 +145,7 @@ pub async fn nixpkgslatest() -> Result<String> {
         String::from("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixpkgs-unstable/nixpkgs.ver")
     };
     debug!("Checking nixpkgs version");
-    let resp = reqwest::blocking::get(&verurl);
+    let resp = reqwest::get(&verurl).await;
     let resp = if let Ok(r) = resp {
         r
     } else {
@@ -160,7 +160,7 @@ pub async fn nixpkgslatest() -> Result<String> {
         }
     };
     let latestnixpkgsver = if resp.status().is_success() {
-        resp.text()?
+        resp.text().await?
     } else {
         return Err(anyhow!("Could not find latest nixpkgs version"));
     };
@@ -184,13 +184,13 @@ pub async fn nixpkgslatest() -> Result<String> {
         String::from("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixpkgs-unstable/nixpkgs_versions.db.br")
     };
     debug!("Downloading nix-data database");
-    let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let resp = client.get(url).send()?;
+    let client = reqwest::Client::builder().brotli(true).build()?;
+    let resp = client.get(url).send().await?;
     if resp.status().is_success() {
         debug!("Writing nix-data database");
         let mut out = File::create(&format!("{}/nixpkgs.db", &*CACHEDIR))?;
         {
-            let bytes = resp.bytes()?;
+            let bytes = resp.bytes().await?;
             let mut reader = brotli::Decompressor::new(
                 bytes.as_ref(),
                 4096, // buffer size

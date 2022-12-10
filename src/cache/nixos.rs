@@ -28,8 +28,8 @@ pub async fn nixospkgs() -> Result<String> {
         version
     );
     debug!("Checking NixOS version");
-    let resp = reqwest::blocking::get(&verurl);
-    let resp = if let Ok(r) = resp {
+    let resp = reqwest::get(&verurl);
+    let resp = if let Ok(r) = resp.await {
         r
     } else {
         // Internet connection failed
@@ -43,12 +43,12 @@ pub async fn nixospkgs() -> Result<String> {
         }
     };
     let latestnixosver = if resp.status().is_success() {
-        resp.text()?
+        resp.text().await?
     } else {
-        let resp = reqwest::blocking::get("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-unstable/nixpkgs.ver")?;
+        let resp = reqwest::get("https://raw.githubusercontent.com/snowflakelinux/nix-data-db/main/nixos-unstable/nixpkgs.ver").await?;
         if resp.status().is_success() {
             version = "unstable";
-            resp.text()?
+            resp.text().await?
         } else {
             return Err(anyhow!("Could not find latest NixOS version"));
         }
@@ -73,13 +73,13 @@ pub async fn nixospkgs() -> Result<String> {
         version
     );
     debug!("Downloading nix-data database");
-    let client = reqwest::blocking::Client::builder().brotli(true).build()?;
-    let resp = client.get(url).send()?;
+    let client = reqwest::Client::builder().brotli(true).build()?;
+    let resp = client.get(url).send().await?;
     if resp.status().is_success() {
         debug!("Writing nix-data database");
         let mut out = File::create(&format!("{}/nixospkgs.db", &*CACHEDIR))?;
         {
-            let bytes = resp.bytes()?;
+            let bytes = resp.bytes().await?;
             let mut reader = brotli::Decompressor::new(
                 bytes.as_ref(),
                 4096, // buffer size
