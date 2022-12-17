@@ -207,7 +207,7 @@ pub(super) async fn getnixospkgs(
     for pkg in pkgs {
         let mut sqlout = sqlx::query(
             r#"
-            SELECT pname, version FROM pkgs WHERE attribute = $1
+            SELECT version FROM pkgs WHERE attribute = $1
             "#,
         )
         .bind(&pkg)

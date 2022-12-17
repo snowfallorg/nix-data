@@ -79,7 +79,7 @@ pub fn getprofilepkgs() -> Result<HashMap<String, ProfilePkg>> {
 }
 
 /// Returns a list of all packages installed with `nix profile` with their name and version.
-/// Takes significantly longer than [getprofilepkgs()].
+/// Takes a bit longer than [getprofilepkgs()].
 pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
     if !Path::new(&format!("{}/.nix-profile/manifest.json", std::env::var("HOME")?)).exists() {
         return Ok(HashMap::new());
@@ -94,20 +94,16 @@ pub async fn getprofilepkgs_versioned() -> Result<HashMap<String, String>> {
     let mut out = HashMap::new();
     let pool = SqlitePool::connect(&format!("sqlite://{}", latestpkgs)).await?;
     for (pkg, v) in profilepkgs {
-        let mut sqlout = sqlx::query(
+        let mut versions: Vec<(String,)> = sqlx::query_as(
             r#"
-            SELECT pname FROM pkgs WHERE attribute = $1
+            SELECT version FROM pkgs WHERE attribute = $1
             "#,
         )
-        .bind(&pkg)
-        .fetch_all(&pool)
-        .await?;
-        if sqlout.len() == 1 {
-            let row = sqlout.pop().unwrap();
-            let pname: String = row.get("pname");
-            if let Some(version) = v.name.strip_prefix(&format!("{}-", pname.as_str())) {
-                out.insert(pkg, version.to_string());
-            }
+            .bind(&pkg)
+            .fetch_all(&pool)
+            .await?;
+        if !versions.is_empty() {
+            out.insert(pkg, versions.get(0).unwrap().0.to_string());
         }
     }
     Ok(out)
