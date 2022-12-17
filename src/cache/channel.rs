@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{BufReader, Write},
+    io::{BufReader, Read, Write},
     path::Path,
     process::Command,
 };
@@ -46,37 +46,73 @@ pub async fn legacypkgs() -> Result<String> {
         }
     }
 
-    let url = format!(
-        "https://releases.nixos.org/nixos/{}/nixos-{}/packages.json.br",
-        relver, nixosversion
-    );
-
-    // Download file with reqwest
-    let client = reqwest::Client::builder().brotli(true).build()?;
-    let resp = client.get(url).send().await;
-    let resp = if let Ok(r) = resp {
-        r
-    } else {
-        // Internet connection failed
-        // Check if we can use the old database
-        let dbpath = format!("{}/legacypkgs.db", &*CACHEDIR);
-        if Path::new(&dbpath).exists() {
-            info!("Using old database");
-            return Ok(dbpath);
+    async fn downloadrelease(relver: &str, nixosversion: &str) -> Result<HashMap<String, String>> {
+        let url = format!(
+            "https://releases.nixos.org/nixos/{}/nixos-{}/packages.json.br",
+            relver, nixosversion
+        );
+        // Download file with reqwest
+        let client = reqwest::Client::builder().brotli(true).build()?;
+        let resp = client.get(url).send().await;
+        let resp = if let Ok(r) = resp {
+            r
         } else {
             return Err(anyhow!("Failed to download legacy packages.json"));
+        };
+        if resp.status().is_success() {
+            let pkgjson: NixPkgList =
+                serde_json::from_reader(BufReader::new(resp.text().await?.as_bytes()))?;
+            let pkgout = pkgjson
+                .packages
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.version.to_string()))
+                .collect::<HashMap<String, String>>();
+            Ok(pkgout)
+        } else {
+            Err(anyhow!("Failed to download legacy packages.json"))
         }
-    };
-    if resp.status().is_success() {
-        let dbfile = format!("{}/legacypkgs.db", &*CACHEDIR);
-        let pkgjson: NixPkgList = serde_json::from_reader(BufReader::new(resp.text().await?.as_bytes()))?;
-        nixos::createdb(&dbfile, &pkgjson).await?;
-        // Write version downloaded to file
-        File::create(format!("{}/legacypkgs.ver", &*CACHEDIR))?
-            .write_all(nixosversion.as_bytes())?;
-    } else {
-        return Err(anyhow!("Failed to download legacy packages.json"));
     }
+
+    // Get list of packages
+    let pkgout = if let Some(rev) = version.get("nixpkgsRevision") {
+        let url = format!("https://raw.githubusercontent.com/snowflakelinux/nixpkgs-version-data/main/nixos-{}/{}.json.br", relver, rev);
+        println!("{}", url);
+        let resp = reqwest::get(&url).await?;
+        if resp.status().is_success() {
+            let r = resp.bytes().await?;
+            println!("Downloaded");
+            let mut br = brotli::Decompressor::new(r.as_ref(), 4096);
+            let mut pkgsout = Vec::new();
+            br.read_to_end(&mut pkgsout)?;
+            let pkgsjson: HashMap<String, String> = serde_json::from_slice(&pkgsout)?;
+            println!("Decompressed");
+            pkgsjson
+        } else {
+            let url = format!("https://raw.githubusercontent.com/snowflakelinux/nixpkgs-version-data/main/nixos-unstable/{}.json.br", rev);
+            println!("{}", url);
+            let resp = reqwest::get(&url).await?;
+            if resp.status().is_success() {
+                let r = resp.bytes().await?;
+                println!("Downloaded");
+                let mut br = brotli::Decompressor::new(r.as_ref(), 4096);
+                let mut pkgsout = Vec::new();
+                br.read_to_end(&mut pkgsout)?;
+                let pkgsjson: HashMap<String, String> = serde_json::from_slice(&pkgsout)?;
+                println!("Decompressed");
+                pkgsjson
+            } else {
+                downloadrelease(relver, nixosversion).await?
+            }
+        }
+    } else {
+        downloadrelease(relver, nixosversion).await?
+    };
+    let dbfile = format!("{}/legacypkgs.db", &*CACHEDIR);
+
+    nixos::createdb(&dbfile, &pkgout).await?;
+
+    // Write version downloaded to file
+    File::create(format!("{}/legacypkgs.ver", &*CACHEDIR))?.write_all(nixosversion.as_bytes())?;
 
     Ok(format!("{}/legacypkgs.db", &*CACHEDIR))
 }
@@ -133,7 +169,10 @@ pub async fn unavailablepkgs(paths: &[&str]) -> Result<HashMap<String, String>> 
                 &fs::read_to_string(path)?,
                 "environment.systemPackages",
             ) {
-                let filepkgset = filepkgs.into_iter().map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string()).collect::<HashSet<_>>();
+                let filepkgset = filepkgs
+                    .into_iter()
+                    .map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string())
+                    .collect::<HashSet<_>>();
                 allpkgs = allpkgs.union(&filepkgset).map(|x| x.to_string()).collect();
             }
         }
@@ -163,9 +202,16 @@ pub async fn unavailablepkgs(paths: &[&str]) -> Result<HashMap<String, String>> 
     let pool = SqlitePool::connect(&format!("sqlite://{}", nixospkgs)).await?;
 
     for (pkg, _) in legacypkgs {
-        let (x, broken, insecure): (String, u8, u8) = sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1").bind(&pkg).fetch_one(&pool).await?;
+        let (x, broken, insecure): (String, u8, u8) =
+            sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1")
+                .bind(&pkg)
+                .fetch_one(&pool)
+                .await?;
         if x != pkg {
-            unavailable.insert(pkg, String::from("Package not found in newer version of nixpkgs"));
+            unavailable.insert(
+                pkg,
+                String::from("Package not found in newer version of nixpkgs"),
+            );
         } else if broken == 1 {
             unavailable.insert(pkg, String::from("Package is marked as broken"));
         } else if insecure == 1 {

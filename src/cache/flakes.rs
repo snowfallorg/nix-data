@@ -1,18 +1,18 @@
 use crate::CACHEDIR;
 use anyhow::{Context, Result};
-use log::{info, warn};
+use log::info;
 use sqlx::SqlitePool;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::Write,
+    io::{Read, Write},
     path::Path,
     process::Command,
 };
 
 use super::{
     nixos::{self, getnixospkgs, nixospkgs},
-    NixPkg, NixPkgList,
+    NixPkg,
 };
 
 /// Gets a list of all packages in the NixOS system with their name and version.
@@ -42,30 +42,69 @@ pub async fn flakespkgs() -> Result<String> {
 
     // Get list of packages from flake
     let pkgsout = if let Some(rev) = version.get("nixpkgsRevision") {
-        Command::new("nix")
-            .arg("search")
-            .arg("--json")
-            .arg(&format!("nixpkgs/{}", rev))
-            .output()?
+        let url = format!("https://raw.githubusercontent.com/snowflakelinux/nixpkgs-version-data/main/nixos-{}/{}.json.br", nixosversion.get(0..5).context("Invalid NixOS version")?, rev);
+        let resp = reqwest::get(&url).await?;
+        if resp.status().is_success() {
+            let r = resp.bytes().await?;
+            let mut br = brotli::Decompressor::new(r.as_ref(), 4096);
+            let mut pkgsout = Vec::new();
+            br.read_to_end(&mut pkgsout)?;
+            let pkgsjson: HashMap<String, String> = serde_json::from_slice(&pkgsout)?;
+            pkgsjson
+        } else {
+            let url = format!("https://raw.githubusercontent.com/snowflakelinux/nixpkgs-version-data/main/nixos-unstable/{}.json.br", rev);
+            let resp = reqwest::get(&url).await?;
+            if resp.status().is_success() {
+                let r = resp.bytes().await?;
+                let mut br = brotli::Decompressor::new(r.as_ref(), 4096);
+                let mut pkgsout = Vec::new();
+                br.read_to_end(&mut pkgsout)?;
+                let pkgsjson: HashMap<String, String> = serde_json::from_slice(&pkgsout)?;
+                pkgsjson
+            } else {
+                let pkgsout = Command::new("nix")
+                    .arg("search")
+                    .arg("--json")
+                    .arg(&format!("nixpkgs/{}", rev))
+                    .output()?;
+                let pkgsjson: HashMap<String, NixPkg> =
+                    serde_json::from_str(&String::from_utf8(pkgsout.stdout)?)?;
+                let pkgsjson = pkgsjson
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.split('.').collect::<Vec<_>>()[2..].join("."),
+                            v.version.to_string(),
+                        )
+                    })
+                    .collect::<HashMap<String, String>>();
+                pkgsjson
+            }
+        }
     } else {
-        Command::new("nix")
+        let pkgsout = Command::new("nix")
             .arg("search")
             .arg("--json")
             // .arg("--inputs-from")
             // .arg(&flakepath)
             .arg("nixpkgs")
-            .output()?
+            .output()?;
+        let pkgsjson: HashMap<String, NixPkg> =
+            serde_json::from_str(&String::from_utf8(pkgsout.stdout)?)?;
+        let pkgsjson = pkgsjson
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.split('.').collect::<Vec<_>>()[2..].join("."),
+                    v.version.to_string(),
+                )
+            })
+            .collect::<HashMap<String, String>>();
+        pkgsjson
     };
 
-    let mut pkgsjson: HashMap<String, NixPkg> =
-        serde_json::from_str(&String::from_utf8(pkgsout.stdout)?)?;
-    pkgsjson = pkgsjson
-        .iter()
-        .map(|(k, v)| (k.split('.').collect::<Vec<_>>()[2..].join("."), v.clone()))
-        .collect::<HashMap<_, _>>();
-
     let dbfile = format!("{}/flakespkgs.db", &*CACHEDIR);
-    nixos::createdb(&dbfile, &NixPkgList { packages: pkgsjson }).await?;
+    nixos::createdb(&dbfile, &pkgsout).await?;
 
     // Write version downloaded to file
     File::create(format!("{}/flakespkgs.ver", &*CACHEDIR))?.write_all(nixosversion.as_bytes())?;
@@ -82,8 +121,18 @@ pub async fn getflakepkgs(paths: &[&str]) -> Result<HashMap<String, String>> {
 pub fn uptodate() -> Result<Option<(String, String)>> {
     let flakesver = fs::read_to_string(&format!("{}/flakespkgs.ver", &*CACHEDIR))?;
     let nixosver = fs::read_to_string(&format!("{}/nixospkgs.ver", &*CACHEDIR))?;
-    let flakeslast = flakesver.split('.').collect::<Vec<_>>().last().context("Invalid version")?.to_string();
-    let nixoslast = nixosver.split('.').collect::<Vec<_>>().last().context("Invalid version")?.to_string();
+    let flakeslast = flakesver
+        .split('.')
+        .collect::<Vec<_>>()
+        .last()
+        .context("Invalid version")?
+        .to_string();
+    let nixoslast = nixosver
+        .split('.')
+        .collect::<Vec<_>>()
+        .last()
+        .context("Invalid version")?
+        .to_string();
     if !nixoslast.starts_with(&flakeslast) {
         Ok(Some((flakesver, nixosver)))
     } else {
@@ -96,18 +145,20 @@ pub async fn unavailablepkgs(paths: &[&str]) -> Result<HashMap<String, String>> 
     let version: HashMap<String, String> = serde_json::from_slice(&versionout.stdout)?;
     let nixpath = if let Some(rev) = version.get("nixpkgsRevision") {
         Command::new("nix")
-        .arg("eval")
-        .arg(&format!("nixpkgs/{}#path", rev))
-        .output()?.stdout
+            .arg("eval")
+            .arg(&format!("nixpkgs/{}#path", rev))
+            .output()?
+            .stdout
     } else {
         Command::new("nix")
-        .arg("eval")
-        .arg("nixpkgs#path")
-        .output()?.stdout
+            .arg("eval")
+            .arg("nixpkgs#path")
+            .output()?
+            .stdout
     };
     let nixpath = String::from_utf8(nixpath)?;
     let nixpath = nixpath.trim();
-    
+
     let aliases = Command::new("nix-instantiate")
         .arg("--eval")
         .arg("-E")
@@ -124,7 +175,10 @@ pub async fn unavailablepkgs(paths: &[&str]) -> Result<HashMap<String, String>> 
                 &fs::read_to_string(path)?,
                 "environment.systemPackages",
             ) {
-                let filepkgset = filepkgs.into_iter().map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string()).collect::<HashSet<_>>();
+                let filepkgset = filepkgs
+                    .into_iter()
+                    .map(|x| x.strip_prefix("pkgs.").unwrap_or(&x).to_string())
+                    .collect::<HashSet<_>>();
                 allpkgs = allpkgs.union(&filepkgset).map(|x| x.to_string()).collect();
             }
         }
@@ -154,9 +208,16 @@ pub async fn unavailablepkgs(paths: &[&str]) -> Result<HashMap<String, String>> 
     let pool = SqlitePool::connect(&format!("sqlite://{}", nixospkgs)).await?;
 
     for (pkg, _) in profilepkgs {
-        let (x, broken, insecure): (String, u8, u8) = sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1").bind(&pkg).fetch_one(&pool).await?;
+        let (x, broken, insecure): (String, u8, u8) =
+            sqlx::query_as("SELECT attribute,broken,insecure FROM meta WHERE attribute = $1")
+                .bind(&pkg)
+                .fetch_one(&pool)
+                .await?;
         if x != pkg {
-            unavailable.insert(pkg, String::from("Package not found in newer version of nixpkgs"));
+            unavailable.insert(
+                pkg,
+                String::from("Package not found in newer version of nixpkgs"),
+            );
         } else if broken == 1 {
             unavailable.insert(pkg, String::from("Package is marked as broken"));
         } else if insecure == 1 {

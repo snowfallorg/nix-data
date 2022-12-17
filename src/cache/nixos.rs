@@ -1,4 +1,4 @@
-use crate::{cache::NixPkgList, CACHEDIR};
+use crate::CACHEDIR;
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
 use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
@@ -222,7 +222,7 @@ pub(super) async fn getnixospkgs(
     Ok(out)
 }
 
-pub(super) async fn createdb(dbfile: &str, pkgjson: &NixPkgList) -> Result<()> {
+pub(super) async fn createdb(dbfile: &str, pkgjson: &HashMap<String, String>) -> Result<()> {
     let db = format!("sqlite://{}", dbfile);
     if Path::new(dbfile).exists() {
         fs::remove_file(dbfile)?;
@@ -233,7 +233,6 @@ pub(super) async fn createdb(dbfile: &str, pkgjson: &NixPkgList) -> Result<()> {
         r#"
             CREATE TABLE "pkgs" (
                 "attribute"	TEXT NOT NULL UNIQUE,
-                "pname"	TEXT,
                 "version"	TEXT,
                 PRIMARY KEY("attribute")
             )
@@ -248,17 +247,17 @@ pub(super) async fn createdb(dbfile: &str, pkgjson: &NixPkgList) -> Result<()> {
     )
     .execute(&pool)
     .await?;
-    sqlx::query(
-        r#"
-        CREATE INDEX "pnames" ON "pkgs" ("attribute")
-        "#,
-    )
-    .execute(&pool)
-    .await?;
+    // sqlx::query(
+    //     r#"
+    //     CREATE INDEX "pnames" ON "pkgs" ("attribute")
+    //     "#,
+    // )
+    // .execute(&pool)
+    // .await?;
 
     let mut wtr = csv::Writer::from_writer(vec![]);
-    for (pkg, data) in &pkgjson.packages {
-        wtr.serialize((pkg, data.pname.to_string(), data.version.to_string()))?;
+    for (pkg, version) in pkgjson {
+        wtr.serialize((pkg.to_string(), version.to_string()))?;
     }
     let data = String::from_utf8(wtr.into_inner()?)?;
     let mut cmd = Command::new("sqlite3")
