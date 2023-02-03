@@ -10,11 +10,16 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, naersk, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+    rec {
+      nixosModules.nix-data = import ./modules/default.nix;
+      nixosModules.default = nixosModules.nix-data;
+    }
+    // flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         naersk-lib = naersk.lib."${system}";
-      in rec
+      in
+      rec
       {
         packages.nixeditor = naersk-lib.buildPackage {
           pname = "nix-data";
@@ -45,12 +50,5 @@
             sqlite
           ];
         };
-
-        nixosModules.nix-data = ({ config, ... }: import ./modules/default.nix {
-          inherit pkgs;
-          inherit (pkgs) lib;
-          inherit config;
-        });
-        nixosModules.default = nixosModules.nix-data;
       });
 }
