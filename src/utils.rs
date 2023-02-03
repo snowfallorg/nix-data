@@ -2,7 +2,7 @@ use crate::HOME;
 use anyhow::{Context, Result};
 use std::{
     fs::{self, File},
-    path::Path, io::{Read, Write}, os::unix::prelude::PermissionsExt,
+    path::Path, io::{Read, Write},
 };
 
 /// Refreshes desktop icons for applications installed with Nix

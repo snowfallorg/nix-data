@@ -247,13 +247,6 @@ pub(super) async fn createdb(dbfile: &str, pkgjson: &HashMap<String, String>) ->
     )
     .execute(&pool)
     .await?;
-    // sqlx::query(
-    //     r#"
-    //     CREATE INDEX "pnames" ON "pkgs" ("attribute")
-    //     "#,
-    // )
-    // .execute(&pool)
-    // .await?;
 
     let mut wtr = csv::Writer::from_writer(vec![]);
     for (pkg, version) in pkgjson {
@@ -262,7 +255,7 @@ pub(super) async fn createdb(dbfile: &str, pkgjson: &HashMap<String, String>) ->
     let data = String::from_utf8(wtr.into_inner()?)?;
     let mut cmd = Command::new("sqlite3")
         .arg("-csv")
-        .arg(&dbfile)
+        .arg(dbfile)
         .arg(".import '|cat -' pkgs")
         .stdin(Stdio::piped())
         .spawn()?;
