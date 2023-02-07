@@ -3,10 +3,6 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     naersk.url = "github:nix-community/naersk";
-    flake-compat = {
-      url = "github:edolstra/flake-compat";
-      flake = false;
-    };
   };
 
   outputs = { self, nixpkgs, flake-utils, naersk, ... }:
@@ -21,22 +17,6 @@
       in
       rec
       {
-        packages.nixeditor = naersk-lib.buildPackage {
-          pname = "nix-data";
-          root = ./.;
-          nativeBuildInputs = with pkgs; [ makeWrapper ];
-          buildInputs = with pkgs; [
-            openssl
-            pkg-config
-            sqlite
-          ];
-          postInstall = ''
-            wrapProgram $out/bin/nix-data --prefix PATH : '${pkgs.lib.makeBinPath [ pkgs.sqlite ]}'
-          '';
-        };
-
-        defaultPackage = self.packages.${system}.nixeditor;
-
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
             rust-analyzer
