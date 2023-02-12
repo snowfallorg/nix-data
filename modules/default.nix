@@ -34,7 +34,7 @@ in
     };
   };
 
-  config = mkIf (cfg.enable || cfg.systemconfig != null || cfg.flake != null || cfg.flakearg != null || cfg.generations != null) {
+  config = mkIf cfg.enable {
       environment.etc."nix-data/config.json".source = jsonFormat.generate "config.json" { inherit (cfg) systemconfig flake flakearg generations; };
     };
 }
